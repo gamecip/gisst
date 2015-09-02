@@ -27,9 +27,8 @@ def is_valid_uri(uri):
     return True
 
 
-def process_game_uri(uri):
-    e_class = find_extractor_class(uri)
-    return e_class(requests.get(uri).text, GameRef)
+def get_extractor_for_uri(uri):
+    return find_extractor_class(uri)
 
 
 def process_game_file(file_name):

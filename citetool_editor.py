@@ -57,58 +57,52 @@ def generate(uri_or_filename, export):
     '''Generate metadata information and citation package data from source URI or video file'''
     if is_valid_uri(uri_or_filename):
         click.echo("Collecting information from {}".format(get_source_name(uri_or_filename)))
-        extractor = process_game_uri(uri_or_filename)
-        fill_in_elements(extractor)
-        check_for_duplicate(extractor)
-        create_citation_package(extractor, export=export)
+        extractor = get_extractor_for_uri(uri_or_filename)
+
+        # Extract metadata from source uri that is not tied to addition file processing
+        extractor.extract_metadata()
+
+        # Many URLs aggregate games by platform and region if there are many versions
+        if extractor.has_multiple_refs():
+            ref = choose_ref(extractor.get_refs())
+        else:
+            ref = extractor.single_ref
+
+        # Fill in additional metadata information
+        fill_in_elements(ref)
+
+        # Handle potential duplication
+        handle_duplicate(ref)
+
+        # If there is an additional file(s) extract them and update ref
+        extractor.extract_file(ref)
+
+        # Final update for file metadata
+        fill_in_elements(ref)
+
+        # Export (if requested), update database, and exit!
+        create_citation_package(ref, export=export)
+
     elif is_valid_file(uri_or_filename):
         pass
     else:
         click.echo("{} is not a valid input source".format(uri_or_filename))
 
 
-def fill_in_elements(extractor):
-    click.echo("Could not extract " + extractor.get_missing_element_names())
-    click.echo(print_cite_ref(extractor.reference_object()))
-    if click.confirm("Add more metadata?"):
-        valid_elements = extractor.get_all_element_names()
-        while 1:
-            element_name = (click.prompt("Which element?")).replace(" ", "_").lowercase()
-            if element_name in valid_elements:
-                prop = getattr(extractor, element_name)
-                value = click.prompt(prop.cli_message)
-                if prop.validate(value):
-                    extractor.add_element_value_pair(element_name, value)
-                    click.echo(print_cite_ref(extractor.reference_object()))
-                    if click.confirm("Add more metadata?"):
-                        continue
-                    else:
-                        break
-                else:
-                    click.echo("Value {} not allowed for field {}.".format(value, element_name))
+def choose_ref(refs):
+    pass
 
-            else:
-                click.echo("{} not a valid element name.")
-                continue
+def fill_in_elements(reference):
+    pass
 
 
-def check_for_duplicate(extractor):
-    dbm.connect_to_db()
-    if dbm.is_game_in_db(extractor.title.value):
-        if click.confirm("Found a match for title: {} in database. View?"):
-            click.echo(print_cite_ref(extractor.reference_object()))
-            if not click.confirm("Proceed with extraction anyway?"):
-                sys.exit(1)
-
+def handle_duplicate(reference):
+    pass
 
 # Will expand this much in the future, for right now just outputs JSON to make sure this
 # whole she-bang is working
-def create_citation_package(extractor, export=None):
-
-    if export:
-        json.dump(extractor.reference_object().elements, export)
-
-    dbm.insert_into_table(dbm.GAME_TABLE, extractor.reference_object().values)
+def create_citation_package(reference, export=None):
+    pass
 
 
 
