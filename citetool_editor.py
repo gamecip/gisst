@@ -33,7 +33,12 @@ def cli(ctx, verbose):
 def extract_uri(ctx, uri):
     verbose = ctx.obj['VERBOSE']
     check_for_extract_db_and_data()
-    cond_print(verbose, "Starting extraction of {} source".format(get_uri_source_name(uri)))
+    source_name = get_uri_source_name(uri)
+    if source_name:
+        cond_print(verbose, "Starting extraction of {} source".format(source_name))
+    else:
+        click.echo("Could not find extractor for given uri:{}. Goodbye!".format(uri))
+        sys.exit(1)
 
     try:
         source = get_url_source(uri)
@@ -58,6 +63,7 @@ def extract_uri(ctx, uri):
         if not click.confirm('This doesn\'t appear to be a game related uri. Extract anyway?'):
             sys.exit(1)
 
+    cond_print(verbose, 'Extracting URI...')
     extracted_info = extractor.extract()
 
     if 'errors' not in extracted_info:
@@ -117,7 +123,8 @@ def get_duplicates(uri):
 def settle_for_duplicate(uri):
     dups = get_duplicates(uri)
     while 1:
-        answer = prompt_input('{} potential duplicates found. (v)iew / (i)gnore?'.format(len(dups)), ('V', 'v', 'I', 'i'))
+        answer = prompt_input('{} potential duplicates found. (v)iew / (i)gnore? / (q)uit?'.format(len(dups)),
+                              ('V', 'v', 'I', 'i', 'Q', 'q'))
         if answer in ('V', 'v'):
             dup_list = ""
             for i, dup in enumerate(dups):
@@ -137,6 +144,8 @@ def settle_for_duplicate(uri):
                         if s in ('Q', 'q'):
                             return True
                 return False
+            return True
+        elif answer in ('Q', 'q'):
             return True
         else:
             return False

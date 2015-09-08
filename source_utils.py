@@ -30,6 +30,7 @@ def get_uri_source_name(uri):
     for search_uri, name, _ in source_uris:
         if re.search(search_uri, uri):
             return name
+    return None
 
 def get_file_source_name(filename):
     pass

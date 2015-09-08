@@ -13,6 +13,7 @@ import shutil
 import os
 import re
 import requests
+import copy
 from utils import (
     pairwise,
     pairwise_overlap,
@@ -35,12 +36,11 @@ local_extract_store = 'extracted_data'
 # hashed by uri and dt string in ISO format
 # Returns hex hash of page_data
 def save_page_to_extract_store(uri, dt, page_data):
-    # http://stackoverflow.com/questions/273192/in-python-check-if-a-directory-exists-and-create-it-if-necessary
-    # Note that not perfect but effective for now
-
     name_hash = hashlib.sha1(uri + dt).hexdigest()
     hash_dir = "{}/{}".format(local_extract_store, name_hash)
 
+    # http://stackoverflow.com/questions/273192/in-python-check-if-a-directory-exists-and-create-it-if-necessary
+    # Note that not perfect but effective for now
     if not os.path.exists(hash_dir):
         os.makedirs(hash_dir)
 
@@ -201,7 +201,7 @@ class MobyGamesExtractor(Extractor):
         if is_specific:
             main_url = is_specific.group()
         else:
-            main_url = re.search(r'http://www.mobygames.com/game/[a-z0-9\-]+', self.source.url)
+            main_url = re.search(r'http://www.mobygames.com/game/[a-z0-9\-]+', self.source.url).group()
 
         main_page = self.get_page(main_url)
         credits_page = self.get_page(main_url + '/credits')
@@ -215,12 +215,13 @@ class MobyGamesExtractor(Extractor):
                                      MobyGamesExtractor.scrape_specs_page(specs_page),
                                      MobyGamesExtractor.scrape_rating_page(rating_page))
 
+        html_data = [x.text for x in [y for y in (main_page, credits_page, release_page, specs_page, rating_page) if y]]
         now = datetime.now(tz=pytz.utc).isoformat()
         extracted_info['extracted_datetime'] = now
         extracted_info['source_uri'] = self.source.url # should this be the base main_url or the specific one slurped?
         extracted_info['source_file_hash'] = save_page_to_extract_store(self.source.url,
                                                                         now,
-                                                                        (main_page, credits_page, release_page, specs_page, rating_page))
+                                                                        html_data)
         return extracted_info
 
     def validate(self):
@@ -250,9 +251,10 @@ class MobyGamesExtractor(Extractor):
             for field, div_string in MobyGamesExtractor.headers[div_id].items():
                 core_div = b.find('div', id=div_id).find('div', string=div_string)
                 if core_div:
+                    ts = [replace_xa0(x.text) for x in core_div.next_sibling()]
                     main_dict[field] = reduce((lambda terms, func: func(terms, field)),
                                               edit_funcs,
-                                              [x.text.replace(u'\xa0', u' ') for x in core_div.next_sibling()])
+                                              [replace_xa0(x.text) for x in core_div.next_sibling()])
 
         def clear_also_for(terms, f):
             if f == 'also_for':
@@ -260,12 +262,12 @@ class MobyGamesExtractor(Extractor):
                     terms.remove(u'Combined View') # Not a platform!
                 except ValueError:
                     pass
-                return terms
+            return terms
 
         # Probably want official site url saved
         def add_official_site_url(terms, f):
             if f == 'official_site':
-                main_dict['official_site_url'] = b.find(id='coreGameRelease').find('a', string=terms[0]).href
+                main_dict['official_site_url'] = b.find(id='coreGameRelease').find('a', string=terms[0])['href']
             return terms
 
         # Publisher, Developer, Release Date, Platforms
@@ -299,13 +301,16 @@ class MobyGamesExtractor(Extractor):
             for tr in table_object.find_all('tr'):
                 tds = tr.find_all('td')
                 if len(tds) == 1:
-                    cred_header = tds[0].text.replace(u'\xa0', u' ')
+                    cred_header = replace_xa0(tds[0].text)
                     if cred_header == u'Credits':
                         cred_header = u'General'
                     credits_dict[cred_header] = {}
                 else:
-                    h_text = tds[0].text.replace(u'\xa0', u' ')
-                    v = [a.text.replace(u'\xa0', u' ') for a in tds[1].find_all('a')]
+                    h_text = replace_xa0(tds[0].text)
+                    # This searches by linked names, so does not catch additional text not in an <a> tag
+                    # So if <a>{person name}</a>{other text}, only person name is captured
+                    v = {'names': [replace_xa0(a.text) for a in tds[1].find_all('a')],
+                         'full_text': replace_xa0(tds[1].text)}
                     credits_dict[cred_header][h_text] = v
             return credits_dict
 
@@ -313,7 +318,6 @@ class MobyGamesExtractor(Extractor):
         main_dict['credits'] = extract_credits_table(b.find('table', summary='List of Credits'))
 
         return main_dict
-
 
     @staticmethod
     def scrape_release_page(page_data):
@@ -337,44 +341,71 @@ class MobyGamesExtractor(Extractor):
         # instead of a rather large for loop and condition mess
         header_rules = (('header', 'attr'), ('header', 'rel_info'))
         attr_rules = (('attr', 'attr'), ('attr', 'rel_info'))
-        rel_info_rules = (('rel_info', 'rel_info'),)
-        index_rule = (('rel_info', 'attr'),)
-        stop_rule = (('attr', None), ('rel_info', None))
+        patch_rules = (('patch', 'patch_rel_info'),)
+        patch_rel_info_rules = (('patch_rel_info', 'patch_rel_info'),)
+        rel_info_rules = (('rel_info', 'rel_info'), ('rel_info', 'patch'))
+        index_rule = (('rel_info', 'attr'), ('rel_info', 'header'), ('patch_rel_info', 'header'))
+        stop_rule = (('attr', None), ('rel_info', None), ('patch_rel_info', None))
 
         def create_div_tuple(div):
             if div.name == u'h2':
                 # ('header', platform name)
                 return 'header', replace_xa0(div.text)
-            elif div['class'] == u'floatholder':
+            elif div.name == u'b':
+                # ('patch', None)
+                return 'patch', None
+            elif 'class' in div.attrs and u'relInfo' in div['class']:
+                # ('patch_rel_info', {relInfoTitle: relInfoDetails, ...})
+                return 'patch_rel_info', dict([(replace_xa0(div.find(class_='relInfoTitle').text),
+                                                replace_xa0(div.find(class_='relInfoDetails').text))])
+            elif 'class' in div.attrs and u'floatholder' in div['class']:
                 # ('attr', {attr_name: [value, ...]})
                 return 'attr', {snake_case(replace_xa0(div.find(class_='fl').text)): [a.text for a in div.find_all('a')]}
             elif div.find(class_='relInfo'):
                 # ('rel_info', {relInfoTitle: relInfoDetails, ...})
                 return 'rel_info', dict([(replace_xa0(r.find(class_='relInfoTitle').text),
-                                          replace_xa0(r.find(class_='relInfoDetails').text)) for r in div.find_all('relInfo')])
+                                          replace_xa0(r.find(class_='relInfoDetails').text)) for r in div.find_all(class_='relInfo')])
             else:
                 return None, None
 
-        release_divs = map(create_div_tuple, release_div.children)
+        # Pages with patch histories insert newline characters that convert to NavigableStrings, don't want those
+        release_divs = map(create_div_tuple, [c for c in release_div.children if not isinstance(c, bs4.NavigableString)])
         release_platform = None
         rel_dict = {'releases': []}
         for first, second in pairwise_overlap(release_divs):
             rule = (first[0], second[0])
             if rule in header_rules:
+                # Start a new listing for platform
                 release_platform = first[1]
                 main_dict['release_platforms'][release_platform] = []
+            elif rule in patch_rules:
+                # Add key for patch history
+                rel_dict['patch_history'] = []
             elif rule in attr_rules:
+                # Add key / value to release dict
                 rel_dict = merge_dicts(rel_dict, first[1])
             elif rule in rel_info_rules:
+                # Add new relInfo to release dict
                 rel_dict['releases'].append(first[1])
+            elif rule in patch_rel_info_rules:
+                # Add patch relInfo to release dict
+                rel_dict['patch_history'].append(first[1])
             elif rule in index_rule:
+                # Add new relInfo to current release dict and start new one
+                if rule[0] == 'rel_info':
+                    rel_dict['releases'].append(first[1])
+                elif rule[0] == 'patch_rel_info':
+                    rel_dict['patch_history'].append(first[1])
                 main_dict['release_platforms'][release_platform].append(rel_dict)
                 rel_dict = {'releases': []}
             elif rule in stop_rule:
+                # Out of release information divs, clean up and stop processing
                 if rule[0] == 'attr':
                     rel_dict = merge_dicts(rel_dict, first[1])
                 elif rule[0] == 'rel_info':
                     rel_dict['releases'].append(first[1])
+                elif rule[0] == 'patch_rel_info':
+                    rel_dict['patch_history'].append(first[1])
                 main_dict['release_platforms'][release_platform].append(rel_dict)
                 break
 
@@ -391,7 +422,7 @@ class MobyGamesExtractor(Extractor):
         main_dict['specs'] = []
 
         # All spec information in platform specific tables
-        for table in b.find('table', class_='techInfo'):
+        for table in b.find_all('table', class_='techInfo'):
             tds = table.find_all('td')[1:]  # First td is table header title
             table_dict = dict([(snake_case(replace_xa0(h.text)),
                                [replace_xa0(a.text) for a in v.find_all('a')]) for h, v in pairwise(tds)])
@@ -412,7 +443,7 @@ class MobyGamesExtractor(Extractor):
         main_dict['rating_platform'] = {}
 
         for h in b.find_all('h2'):
-            rating_dict = dict([tuple(replace_xa0(tr.text).split(u':')) for tr in h.next_sibling.find_all('tr')])
+            rating_dict = dict([tuple(replace_xa0(tr.text).split(u':', 1)) for tr in h.next_sibling.find_all('tr')])
             main_dict['rating_platform'][replace_xa0(h.text)] = rating_dict
 
         return main_dict
