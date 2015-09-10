@@ -4,6 +4,7 @@ __author__ = 'erickaltman'
 
 
 import bs4
+import base64
 from datetime import datetime
 import pytz
 import hashlib
@@ -85,7 +86,7 @@ def save_file_to_extract_store(file_path):
 
 
 
-# Game Citation Extractor listing one for each major citation source
+# Game Extractor listing one for each major citation source
 # Includes extractor specific utility functions
 
 class Extractor(object):
@@ -101,6 +102,7 @@ class Extractor(object):
         raise NotImplementedError
 
 
+# URI Site Extractors
 
 class WikipediaExtractor(Extractor):
     # List obtained from: https://en.wikipedia.org/wiki/Template:Infobox_video_game
@@ -470,6 +472,8 @@ class GiantBombExtractor(Extractor):
         pass
 
 
+# URI Video extractors
+
 class YoutubeExtractor(Extractor):
 
 
@@ -534,3 +538,53 @@ class TwitchExtractor(Extractor):
 
     def validate(self):
         pass
+
+
+class FM2Extractor(Extractor):
+    # Header information obtained from: http://www.fceux.com/web/FM2.html
+    headers = (
+        'version', 'emuVersion', 'rerecordCount', 'palFlag',
+        'NewPPU', 'FDS', 'fourscore', 'port0', 'port1', 'port2',
+        'binary', 'length', 'romFilename', 'comment', 'subtitle',
+        'guid', 'romChecksum', 'savestate'
+    )
+    required = (
+        'version', 'emuVersion', 'port0', 'port1', 'port2',
+        'romFilename', 'guid', 'romChecksum'
+    )
+
+    def extract(self):
+        extracted_info = {}
+
+        # Open file to extract header information
+        with open(self.source, 'r') as source_file:
+            for line in source_file:
+                try:
+                    header, value = line.split(' ', 1)
+                except ValueError:
+                    # Reached input data, stop processing
+                    break
+
+                if header in FM2Extractor.headers:
+                    if header == 'romChecksum':
+                        # For some reason rom checksum is a base64 encoded MD5 hex
+                        extracted_info['romChecksum_converted'] = base64.b64decode(value.split(':')[1]).encode('hex')
+                        extracted_info['romChecksum'] = line.split(' ', 1)[1].replace('\n', '')
+                    elif header == ('comment', 'subtitle'):
+                        if header not in extracted_info:
+                            extracted_info[header] = []
+                        extracted_info[header].append(value)
+                    else:
+                        extracted_info[header] = line.split(' ', 1)[1].replace('\n', '') # Used for most fields
+
+        extracted_info['title'] = self.source.split('/')[-1] # Just get non-pathed filename
+        extracted_info['extracted_datetime'] = datetime.now(tz=pytz.utc).isoformat()
+        extracted_info['source_file_hash'] = save_file_to_extract_store(self.source)
+
+        self.extracted_info = extracted_info
+
+    # Just returns true, validating the file might be going overboard for now
+    # We already check ext anyway
+    def validate(self):
+        return True
+

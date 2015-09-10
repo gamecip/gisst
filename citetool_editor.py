@@ -9,8 +9,11 @@ import pprint
 from database import DatabaseManager as dbm
 from source_utils import (
     get_extractor_for_uri,
+    get_extractor_for_file,
     get_uri_source_name,
     get_url_source,
+    get_file_source_name,
+    get_file_hash,
     SourceError
 )
 from extractors import local_extract_store
@@ -53,8 +56,8 @@ def extract_uri(ctx, uri):
     # input uri, like http -> https. Could check this in the extractor or tell the user that the url is changing.
     # Though if the redirect always happens it wouldn't matter anyway, since the database retains the redirected url
     cond_print(verbose, 'Checking for duplicates...')
-    if has_potential_duplicates(source.url):
-        if settle_for_duplicate(source.url):
+    if has_potential_duplicates(source.url, 'source_uri'):
+        if settle_for_duplicate(source.url, 'source_uri'):
             sys.exit(1)
 
     cond_print(verbose, 'Validating URI...')
@@ -73,34 +76,67 @@ def extract_uri(ctx, uri):
 
     extracted_info = extractor.extracted_info
 
-    if 'errors' not in extracted_info:
-        # This is currently tied to the exact ordering of headers in dbm.headers.EXTRACTED_TABLE
-        # and is thus pretty flimsy, might need to change this management if our use-cases
-        # end up requiring more complexity
-        db_values = (None,    # None because primary key
-                     extracted_info['title'],
-                     extracted_info['source_uri'],
-                     extracted_info['extracted_datetime'],
-                     extracted_info['source_file_hash'],
-                     json.dumps(extracted_info))  # 'metadata' field is just a string dump of the JSON extracted_info object
-
-
-        if not dbm.insert_into_table(dbm.EXTRACTED_TABLE, db_values):
-            click.echo("Error adding data to {}.".format(dbm.EXTRACTED_TABLE))
-
+    if 'errors' not in extracted_info and add_to_extracted_database(extracted_info):
         cond_print(verbose, "Extraction Successful!")
         summary_prompt(extracted_info)
     else:
+        cond_print(verbose, "Extraction Failed!")
         pprint.pprint(extracted_info)
 
 
-
-
+# TODO: extract_file and extract_uri are incredibly similar, combine at some point
 @cli.command()
 @click.argument('path_to_file')
 @click.pass_context
 def extract_file(ctx, path_to_file):
     verbose = ctx.obj['VERBOSE']
+    check_for_extract_db_and_data()
+    source_name = get_file_source_name(path_to_file)
+
+    # Convert to full path if needed
+    full_path = os.path.join(os.getcwd(), path_to_file) if not os.path.isabs(path_to_file) else path_to_file
+
+    # Check if there's actually a file there
+    if not os.path.isfile(full_path):
+        click.echo("There doesn\' appear to be a readable file at:{}.\nExiting.".format(path_to_file))
+        sys.exit(1)
+
+    # Check if it's actually a potentially valid source
+    if source_name:
+        cond_print(verbose, "Starting extraction of {} source".format(source_name))
+    else:
+        click.echo("Could not find extractor for given file path:{}. Goodbye!".format(path_to_file))
+        sys.exit(1)
+
+    # Get the appropriate extractor
+    extractor = get_extractor_for_file(full_path)
+    cond_print(verbose, "Using {} for extraction".format(extractor.__class__.__name__))
+
+
+    # Check if this is a valid file
+    cond_print(verbose, 'Validating File...')
+    if not extractor.validate():
+        if not click.confirm('This doesn\'t appear to be a game related uri. Extract anyway?'):
+            sys.exit(1)
+
+
+    # Check for duplicate entries, by hash of source file
+    hash = get_file_hash(full_path)
+    cond_print(verbose, 'Checking for duplicates...')
+    if has_potential_duplicates(hash, 'source_file_hash'):
+        if settle_for_duplicate(hash, 'source_file_hash'):
+            sys.exit(1)
+
+    cond_print(verbose, 'Extracting URI...')
+    extractor.extract()
+    extracted_info = extractor.extracted_info
+
+    if 'errors' not in extracted_info and add_to_extracted_database(extracted_info):
+        cond_print(verbose, "Extraction Successful!")
+        summary_prompt(extracted_info)
+    else:
+        cond_print(verbose, "Extraction Failed!")
+        pprint.pprint(extracted_info)
 
 
 def cond_print(condition, message):
@@ -118,24 +154,24 @@ def summary_prompt(info):
         break
 
 
-def has_potential_duplicates(uri):
-    return dbm.is_attr_in_db('source_uri', uri, dbm.EXTRACTED_TABLE)
+def has_potential_duplicates(value, field):
+    return dbm.is_attr_in_db(field, value, dbm.EXTRACTED_TABLE)
 
 
-def get_duplicates(uri):
-    dup_tuples = dbm.retrieve_attr_from_db('source_uri', uri, dbm.EXTRACTED_TABLE)
+def get_duplicates(value, field):
+    dup_tuples = dbm.retrieve_attr_from_db(field, value, dbm.EXTRACTED_TABLE)
     return [dict(zip(dbm.headers[dbm.EXTRACTED_TABLE], dup)) for dup in dup_tuples]
 
 
-def settle_for_duplicate(uri):
-    dups = get_duplicates(uri)
+def settle_for_duplicate(value, field):
+    dups = get_duplicates(value, field)
     while 1:
         answer = prompt_input('{} potential duplicates found. (v)iew / (i)gnore? / (q)uit?'.format(len(dups)),
                               ('V', 'v', 'I', 'i', 'Q', 'q'))
         if answer in ('V', 'v'):
             dup_list = ""
             for i, dup in enumerate(dups):
-                dup_list += "{}) {} {} {}\n".format(i + 1, dup['title'], dup['source_uri'], dup['extracted_datetime'])
+                dup_list += "{}) {} {} {}\n".format(i + 1, dup['title'], dup[field], dup['extracted_datetime'])
             while 1:
                 click.echo(dup_list)
                 c_s = 'Choose a number to view [{}], (c)ontinue extraction or (q)uit'.format('1-{}'.format(len(dups)) if len(dups) > 1 else '1')
@@ -168,7 +204,25 @@ def prompt_input(prompt_text, options):
             return s
 
 
-# Current assumes user will want this to be created
+def add_to_extracted_database(extracted_info):
+    # This is currently tied to the exact ordering of headers in dbm.headers.EXTRACTED_TABLE
+    # and is thus pretty flimsy, might need to change this management if our use-cases
+    # end up requiring more complexity
+    db_values = (None,    # None because primary key
+                 extracted_info.get('title', None), # Need .get() since not all types will have each field
+                 extracted_info.get('source_uri', None),
+                 extracted_info.get('extracted_datetime', None),
+                 extracted_info.get('source_file_hash', None),
+                 json.dumps(extracted_info))  # 'metadata' field is just a string dump of the JSON extracted_info object
+
+    insert_data = dbm.insert_into_table(dbm.EXTRACTED_TABLE, db_values)
+
+    if not insert_data:
+        click.echo("Error adding data to {}.".format(dbm.EXTRACTED_TABLE))
+
+    return insert_data
+
+# Currently assumes user will want this to be created
 # TODO: allow user defined extracted data root
 def check_for_extract_db_and_data():
     # Check for extracted data table
@@ -181,6 +235,6 @@ def check_for_extract_db_and_data():
         click.echo("Local extract store: '{}' not found, creating...".format(local_extract_store))
         os.makedirs(local_extract_store)
 
-
+# Needed for testing as script for debugging, not used when run as a command
 if __name__ == '__main__':
     cli()
