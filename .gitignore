@@ -1,0 +1,9 @@
+.idea
+*.pyc
+*.db
+extracted_data/
+*.annotations.xml
+*.mp4
+*.info.json
+*.description
+*.egg-info

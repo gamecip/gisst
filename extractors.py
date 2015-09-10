@@ -2,8 +2,6 @@ __author__ = 'erickaltman'
 # Extractors
 # Classes dealing with automatic extraction of information from urls, files, etc.
 
-# raises NotImplementedError as poor man's abstract base class
-
 
 import bs4
 from datetime import datetime
@@ -13,7 +11,8 @@ import shutil
 import os
 import re
 import requests
-import copy
+import json
+import youtube_dl
 from utils import (
     pairwise,
     pairwise_overlap,
@@ -77,6 +76,9 @@ def save_file_to_extract_store(file_path):
     hash = hasher.hexdigest()
     hash_dir = "{}/{}".format(local_extract_store, hash)
 
+    if not os.path.exists(hash_dir):
+        os.makedirs(hash_dir)
+
     #   Copies to directory with original filename
     shutil.copy2(file_path, hash_dir)
     return hash
@@ -90,6 +92,7 @@ class Extractor(object):
 
     def __init__(self, source):
         self.source = source
+        self.extracted_info = None
 
     def extract(self):
         raise NotImplementedError
@@ -148,14 +151,14 @@ class WikipediaExtractor(Extractor):
 
         # Save page text to disk
         extracted_info['source_file_hash'] = save_page_to_extract_store(self.source.url, now, [self.source.text])
-        return extracted_info
+        self.extracted_info = extracted_info
 
     # Currently searches for the "Category: XXXX video games" tag on a wiki page, where XXXX is a year
     # Every game page should have these, though could include a few more checks if this doesn't cover everything
     def validate(self):
         return re.search("Category:[0-9]{4} video games", self.source.text)
 
-    # Takes in a parsed BeautifulSoup object and exacts the infobox into a dict
+    # Takes in a parsed BeautifulSoup object and extracts the infobox into a dict
     # No additional parsing is done of the table values aside from altering the headers to snake-case
     # and adding the text as line-separated tokens, since most info-boxes use <br/> for lists of terms
     @classmethod
@@ -222,7 +225,7 @@ class MobyGamesExtractor(Extractor):
         extracted_info['source_file_hash'] = save_page_to_extract_store(self.source.url,
                                                                         now,
                                                                         html_data)
-        return extracted_info
+        self.extracted_info = extracted_info
 
     def validate(self):
         return re.search(r'www.mobygames.com/game/', self.source.url)
@@ -458,11 +461,6 @@ class MobyGamesExtractor(Extractor):
         return source
 
 
-
-
-
-
-
 class GiantBombExtractor(Extractor):
 
     def extract(self):
@@ -474,12 +472,60 @@ class GiantBombExtractor(Extractor):
 
 class YoutubeExtractor(Extractor):
 
-    def extract(self):
-        pass
 
-    # Not used, no way to determine if a video is about a video game
+    def extract(self):
+        youtube_opts  = {
+            'outtmpl': u'tmp/%(title)s.%(ext)s', # Template location for temporary file storage
+            'writedescription': True, # Write description file to template location
+            'writeinfojson': True, # Write JSON info file to template location
+            'writeannotations': True, # Write Annotations XML file to template location
+            'progress_hooks': [self.wrap_up_extraction], # Hook called on progress updates from youtube-dl process
+            'ignoreerrors': True
+        }
+
+        # Create tmp directory if not present
+        if not os.path.exists('tmp'):
+            os.makedirs('tmp')
+
+        # Call youtube_dl extraction process
+        with youtube_dl.YoutubeDL(youtube_opts) as ydl:
+            ydl.download([self.source.url])
+
+    # No way to determine if a video is about a video game
+    # Using youtube-dl regex to check, might change later
     def validate(self):
-        pass
+        import youtube_dl.extractor.youtube as youtube
+        return re.search(youtube.YoutubeIE._VALID_URL, self.source.url)
+
+    # Called when download is finished
+    def wrap_up_extraction(self, d):
+        if d['status'] == 'finished':
+            filename = d['filename'].split('/')[1].split('.')[0] # Flimsy for now
+            hash = save_file_to_extract_store('tmp/{}.mp4'.format(filename))
+            hash_dir = '{}/{}'.format(local_extract_store, hash)
+
+            shutil.copy2('tmp/{}.description'.format(filename), hash_dir)
+            shutil.copy2('tmp/{}.info.json'.format(filename), hash_dir)
+            shutil.copy2('tmp/{}.annotations.xml'.format(filename), hash_dir)
+
+            with open('tmp/{}.info.json'.format(filename)) as json_file:
+                info_json = json.load(json_file)
+
+            extracted_info = {}
+            extracted_info['source_uri'] = self.source.url
+            extracted_info['source_file_hash'] = hash
+            extracted_info['extracted_datetime'] = datetime.now(tz=pytz.utc).isoformat()
+
+            # Currently merging everything, might want to be more discriminate
+            extracted_info = merge_dicts(info_json, extracted_info) # info_json['title'] -> extracted_info['title']
+
+            # Clean up tmp directory
+            shutil.rmtree('tmp')
+
+            # Signal complete
+            self.extracted_info = extracted_info
+
+
 
 class TwitchExtractor(Extractor):
 

@@ -64,7 +64,14 @@ def extract_uri(ctx, uri):
             sys.exit(1)
 
     cond_print(verbose, 'Extracting URI...')
-    extracted_info = extractor.extract()
+    # These are separate since file downloads might rely on subprocesses
+    extractor.extract()
+
+    # Block until extraction complete, needed for anything requiring sub-processes
+    while not extractor.extracted_info:
+        pass
+
+    extracted_info = extractor.extracted_info
 
     if 'errors' not in extracted_info:
         # This is currently tied to the exact ordering of headers in dbm.headers.EXTRACTED_TABLE
