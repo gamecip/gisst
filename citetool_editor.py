@@ -8,7 +8,12 @@ import pprint
 from math import ceil
 from database import DatabaseManager as dbm
 from database import local_data_store
-from utils import coroutine, bound_array, clean_for_sqlite_query
+from utils import (
+    coroutine,
+    bound_array,
+    clean_for_sqlite_query,
+    merge_dicts
+)
 from extractors import ExtractorError
 from source_utils import (
     get_extractor_for_uri,
@@ -117,8 +122,9 @@ def extract_uri(ctx, uri):
 # TODO: extract_file and extract_uri are incredibly similar, combine at some point
 @cli.command(help='Extract metadata from a compatible file.')
 @click.argument('path_to_file')
+@click.option('--partial_citation', help='JSON partial with descriptive fields for extracted citation.')
 @click.pass_context
-def extract_file(ctx, path_to_file):
+def extract_file(ctx, path_to_file, partial_citation):
     verbose = ctx.obj['VERBOSE']
     source_name = get_file_source_name(path_to_file)
 
@@ -165,6 +171,9 @@ def extract_file(ctx, path_to_file):
 
     if click.confirm('Create citation from extracted data?'):
         citation, extracted_options = extractor.create_citation()
+        if partial_citation:
+            partial = json.loads(partial_citation)
+            citation.elements = merge_dicts(citation.elements, partial['description'])
         citation = get_citation_user_input(citation, extracted_options)
         if citation.ref_type == GAME_CITE_REF:
             alternate_citation = choose_game_citation(search_locally_with_citation(citation))
