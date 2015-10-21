@@ -14,6 +14,11 @@ import re
 import requests
 import json
 import youtube_dl
+from hachoir_core.error import HachoirError
+from hachoir_parser import createParser
+from hachoir_metadata import extractMetadata
+from hachoir_core.cmd_line import unicodeFilename
+
 from utils import (
     pairwise,
     pairwise_overlap,
@@ -21,8 +26,18 @@ from utils import (
     replace_xa0,
     snake_case
 )
+from schema import (
+    generate_cite_ref,
+    GAME_CITE_REF,
+    PERF_CITE_REF,
+    GAME_SCHEMA_VERSION,
+    PERF_SCHEMA_VERSION
+)
 
-local_extract_store = 'extracted_data'
+from database import (
+    local_data_store
+)
+
 
 # General Utils
 
@@ -37,7 +52,7 @@ local_extract_store = 'extracted_data'
 # Returns hex hash of page_data
 def save_page_to_extract_store(uri, dt, page_data):
     name_hash = hashlib.sha1(uri + dt).hexdigest()
-    hash_dir = "{}/{}".format(local_extract_store, name_hash)
+    hash_dir = "{}/{}".format(local_data_store, name_hash)
 
     # http://stackoverflow.com/questions/273192/in-python-check-if-a-directory-exists-and-create-it-if-necessary
     # Note that not perfect but effective for now
@@ -75,7 +90,7 @@ def save_file_to_extract_store(file_path):
             buf = a_file.read(BLOCKSIZE)
 
     hash = hasher.hexdigest()
-    hash_dir = "{}/{}".format(local_extract_store, hash)
+    hash_dir = "{}/{}".format(local_data_store, hash)
 
     if not os.path.exists(hash_dir):
         os.makedirs(hash_dir)
@@ -85,11 +100,15 @@ def save_file_to_extract_store(file_path):
     return hash
 
 
+class ExtractorError(BaseException):
+    pass
 
 # Game Extractor listing one for each major citation source
 # Includes extractor specific utility functions
 
 class Extractor(object):
+    supports_games = False
+    supports_performances = False
 
     def __init__(self, source):
         self.source = source
@@ -101,10 +120,17 @@ class Extractor(object):
     def validate(self):
         raise NotImplementedError
 
+    #   Creates citations from extracted data to the best of its abilities
+    #   Also returns potentially useful extracted data in an extracted options
+    #   dictionary keyed to the fresh uuid of each citation in citations
+    def create_citation(self):
+        raise NotImplementedError
+
 
 # URI Site Extractors
 
 class WikipediaExtractor(Extractor):
+    supports_games = True
     # List obtained from: https://en.wikipedia.org/wiki/Template:Infobox_video_game
     headers = {
         'developer':        u'Developer(s)',
@@ -160,6 +186,9 @@ class WikipediaExtractor(Extractor):
     def validate(self):
         return re.search("Category:[0-9]{4} video games", self.source.text)
 
+    def create_citation(self):
+        pass
+
     # Takes in a parsed BeautifulSoup object and extracts the infobox into a dict
     # No additional parsing is done of the table values aside from altering the headers to snake-case
     # and adding the text as line-separated tokens, since most info-boxes use <br/> for lists of terms
@@ -179,6 +208,7 @@ class WikipediaExtractor(Extractor):
 
 
 class MobyGamesExtractor(Extractor):
+    supports_games = True
     headers = {
         'coreGameRelease': {
             'publisher':        u'Published by',
@@ -197,16 +227,19 @@ class MobyGamesExtractor(Extractor):
         }
     }
 
+    platform_uri_regex = r'/game/[a-z0-9\-]+/[a-z0-9\-]+'
+    general_game_uri_regex = r'/game/[a-z0-9\-]+'
+
     def extract(self):
 
         # Figure out if specific or general url
         # /game/{platform}/{game name} is specific, otherwise /game/{game name}
-        is_specific = re.search(r'http://www.mobygames.com/game/[a-z0-9]+/[a-z0-9\-]+', self.source.url)
+        is_specific = re.search(r'http://www\.mobygames\.com/game/[a-z0-9\-]+/[a-z0-9\-_]+', self.source.url)
 
         if is_specific:
             main_url = is_specific.group()
         else:
-            main_url = re.search(r'http://www.mobygames.com/game/[a-z0-9\-]+', self.source.url).group()
+            main_url = re.search(r'http://www\.mobygames\.com/game/[a-z0-9\-_]+', self.source.url).group()
 
         main_page = self.get_page(main_url)
         credits_page = self.get_page(main_url + '/credits')
@@ -230,7 +263,72 @@ class MobyGamesExtractor(Extractor):
         self.extracted_info = extracted_info
 
     def validate(self):
-        return re.search(r'www.mobygames.com/game/', self.source.url)
+        return re.search(r'www\.mobygames\.com/game/', self.source.url)
+
+    #   If ignore options is True create_citation will choose first option from extracted data
+    def create_citation(self, ignore_options=False):
+        if not self.extracted_info:
+            return []
+
+        def add_to_cite_or_options(cite, extracted, e_options, source_key, target_key):
+            values = extracted[source_key] if source_key in extracted else None
+            if values:
+                if isinstance(values, list):
+                    if not ignore_options and len(values) > 1:
+                        cite[target_key] = None
+                        e_options[target_key] = values
+                    else:
+                        cite[target_key] = values[0]
+                else:
+                    cite[target_key] = values
+            return cite, e_options
+
+        cite_ref = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION)
+        extracted_options = dict()
+        for s, t in [
+            ('developer', 'developer'),
+            ('publisher', 'publisher'),
+            ('distributor', 'distributor'),
+            ('title', 'title'),
+            ('release_date', 'date_published'),
+            ('platform', 'platform'),
+            ('source_uri', 'source_url'),
+            ('source_file_hash', 'source_data')
+        ]:
+            cite_ref, extracted_options = add_to_cite_or_options(cite_ref, self.extracted_info, extracted_options, s, t)
+
+        if cite_ref['date_published']:
+            year = re.search(r"[0-9]{4}", cite_ref['date_published'])
+            if year:
+                cite_ref['copyright_year'] = year.group()
+
+        return cite_ref, extracted_options
+
+    @staticmethod
+    def get_search_uris(search_terms, offset=None, include_attributes=False):
+        uri = "http://www.mobygames.com/search/quick"
+        get_data = {
+            'q': "+".join(search_terms.split(' ')), # search terms
+            'p': -1,                                # platform = 'All Platforms'
+            'sFilter': 1,                           # use a search filter
+            'sG': 'on'                              # turn on 'Games' search filter
+        }
+
+        #   Offset automatically defaults to floor of 50 increments
+        #   [1-49] -> 0, [51-99] -> 50, [101-149] -> 100, etc.
+        if offset:
+            get_data['offset'] = offset % 50 * 50
+        if include_attributes:
+            get_data['sA'] = 'on'
+
+        page_data = MobyGamesExtractor.get_page(uri, get_data)
+
+        b = bs4.BeautifulSoup(page_data.text, 'html.parser')
+        #   Grab all the hrefs on the page and convert them to absolute urls
+        uris = ["http://www.mobygames.com" + u['href'] for u in b.find_all('a')]
+
+        #   Filter out all those that are not explicit links to a game + platform page
+        return [u for u in uris if re.search(MobyGamesExtractor.platform_uri_regex, u)]
 
     @staticmethod
     def scrape_main_page(page_data):
@@ -292,7 +390,8 @@ class MobyGamesExtractor(Extractor):
         # Some entries have no credits for that specific version (first match)
         # Others have recommendations for other credits if they are available (second),
         # We don't follow that second link since this should just extract the exact root url the user requested
-        if re.search(r'There are no credits for the', page_data.text) or re.search(r'The following releases of this game have credits', page_data.text):
+        if re.search(r'There are no credits for the', page_data.text) or\
+                re.search(r'The following releases of this game have credits', page_data.text):
             main_dict['credits'] = 'none'
             return main_dict
 
@@ -436,7 +535,6 @@ class MobyGamesExtractor(Extractor):
 
         return main_dict
 
-
     @staticmethod
     def scrape_rating_page(page_data):
         main_dict = {}
@@ -454,9 +552,9 @@ class MobyGamesExtractor(Extractor):
         return main_dict
 
     @staticmethod
-    def get_page(uri):
+    def get_page(uri, params=None):
         try:
-            source = requests.get(uri)
+            source = requests.get(uri, params=params)
         except BaseException as e:
             print e.message
             return None
@@ -475,6 +573,7 @@ class GiantBombExtractor(Extractor):
 # URI Video extractors
 
 class YoutubeExtractor(Extractor):
+    supports_performances = True
 
 
     def extract(self):
@@ -484,7 +583,8 @@ class YoutubeExtractor(Extractor):
             'writeinfojson': True, # Write JSON info file to template location
             'writeannotations': True, # Write Annotations XML file to template location
             'progress_hooks': [self.wrap_up_extraction], # Hook called on progress updates from youtube-dl process
-            'ignoreerrors': True
+            'ignoreerrors': True,
+            'format': 'mp4' # Only downloads mp4 for now (if available)
         }
 
         # Create tmp directory if not present
@@ -501,12 +601,28 @@ class YoutubeExtractor(Extractor):
         import youtube_dl.extractor.youtube as youtube
         return re.search(youtube.YoutubeIE._VALID_URL, self.source.url)
 
+    # TODO: why does this return an empty list?
+    def create_citation(self):
+        if not self.extracted_info:
+            return []
+
+        element_dict = {'start_datetime':datetime.strptime(self.extracted_info['upload_date'], '%Y%m%d'),
+                        'replay_source_purl': self.extracted_info['source_uri'],
+                        'replay_source_file_ref': self.extracted_info['source_file_hash'],
+                        'recording_agent': self.extracted_info['uploader'],
+                        'title': self.extracted_info['fulltitle'],
+                        'description': self.extracted_info['description']}
+
+        citation = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **element_dict)
+        return citation, {}
+
     # Called when download is finished
     def wrap_up_extraction(self, d):
         if d['status'] == 'finished':
             filename = d['filename'].split('/')[1].split('.')[0] # Flimsy for now
-            hash = save_file_to_extract_store('tmp/{}.mp4'.format(filename))
-            hash_dir = '{}/{}'.format(local_extract_store, hash)
+            filename_with_ext = d['filename'].split('/')[1]
+            hash = save_file_to_extract_store('tmp/{}'.format(filename_with_ext))
+            hash_dir = '{}/{}'.format(local_data_store, hash)
 
             shutil.copy2('tmp/{}.description'.format(filename), hash_dir)
             shutil.copy2('tmp/{}.info.json'.format(filename), hash_dir)
@@ -541,6 +657,7 @@ class TwitchExtractor(Extractor):
 
 
 class FM2Extractor(Extractor):
+    supports_performances = True
     # Header information obtained from: http://www.fceux.com/web/FM2.html
     headers = (
         'version', 'emuVersion', 'rerecordCount', 'palFlag',
@@ -570,7 +687,7 @@ class FM2Extractor(Extractor):
                         # For some reason rom checksum is a base64 encoded MD5 hex
                         extracted_info['romChecksum_converted'] = base64.b64decode(value.split(':')[1]).encode('hex')
                         extracted_info['romChecksum'] = line.split(' ', 1)[1].replace('\n', '')
-                    elif header == ('comment', 'subtitle'):
+                    elif header in ('comment', 'subtitle'):
                         if header not in extracted_info:
                             extracted_info[header] = []
                         extracted_info[header].append(value)
@@ -588,3 +705,47 @@ class FM2Extractor(Extractor):
     def validate(self):
         return True
 
+
+class GenericVideoExtractor(Extractor):
+    supports_performances = True
+
+    def extract(self):
+        extracted_info = {}
+
+        filename = self.source.split('/')[-1]
+        parser = createParser(filename)
+        if not parser:
+            raise ExtractorError('Unable to parse file.')
+
+        try:
+            metadata = extractMetadata(parser)
+        except HachoirError as e:
+            raise ExtractorError('HachoirError: {}'.format(e.message))
+
+        text = metadata.exportPlaintext()
+        extracted_info['metadata_plain'] = text
+        extracted_info['duration'] = metadata.get('duration').total_seconds()
+        extracted_info['mime_type'] = metadata.get('mime_type')
+        extracted_info['creation_date'] = metadata.get('creation_date').isoformat()
+        extracted_info['last_modification'] = metadata.get('last_modification').isoformat()
+        extracted_info['width'] = metadata.get('width')
+        extracted_info['height'] = metadata.get('height')
+        extracted_info['endian'] = metadata.get('endian')
+        extracted_info['comments'] = metadata.getValues('comment')
+        extracted_info['filename'] = filename
+        extracted_info['title'] = filename.split('.')[0]
+
+        extracted_info['source_file_hash'] = save_file_to_extract_store(self.source)
+
+        self.extracted_info = extracted_info
+
+    #   Not much information from basic video files
+    def create_citation(self):
+        citation = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION)
+        citation['title'] = self.extracted_info['title']
+        citation['replay_source_file_ref'] = self.extracted_info['source_file_hash']
+        citation['start_datetime'] = self.extracted_info['creation_date']
+        return citation, {}
+
+    def validate(self):
+        return True

@@ -1,8 +1,10 @@
 __author__ = 'erickaltman'
 
 from itertools import izip, tee
+from functools import wraps
+import timeit
 
-# Pairwise function from: http://stackoverflow.com/questions/5389507/iterating-over-every-two-elements-in-a-list
+# Pairwise non-overlap function from: http://stackoverflow.com/questions/5389507/iterating-over-every-two-elements-in-a-list
 def pairwise(iterable):
     "s -> (s0,s1), (s2,s3), (s4, s5), ..."
     a = iter(iterable)
@@ -65,4 +67,34 @@ def which(program):
 
     return None
 
+def coroutine(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        generator = func(*args, **kwargs)
+        next(generator)
+        return generator
+    return wrapper
 
+
+def timing(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = timeit.default_timer()
+        result = func(*args, **kwargs)
+        elapsed = timeit.default_timer() - start_time
+        print elapsed
+        return result
+    return wrapper
+
+
+def bound_array(array, start_index=0, limit=None):
+    if limit:
+        sub_array = array[:limit]
+        return sub_array[start_index:]
+    return array[start_index:]
+
+
+def clean_for_sqlite_query(text):
+    puncs = (':', ',')
+    funcs = [lambda t, x=x: t.replace(x, '') for x in puncs]
+    return reduce(lambda y, z: z(y), funcs, text)

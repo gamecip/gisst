@@ -25,6 +25,8 @@ source_uris = [
 
 source_exts = [
     ('\.fm2$', 'FCEUX Movie File', extractors.FM2Extractor),
+    ('\.mp4$', 'MPEG-4 Movie File', extractors.GenericVideoExtractor),
+    ('\.avi$', 'AVI Movie File', extractors.GenericVideoExtractor)
 ]
 
 def get_extractor_for_uri(uri, source):

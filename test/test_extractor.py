@@ -8,4 +8,4 @@ class TestExtractorMethods(unittest.TestCase):
         pass
 
     def tearDown(self):
-        pass__author__ = 'erickaltman'
+        pass
