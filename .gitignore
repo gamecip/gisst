@@ -8,3 +8,6 @@ data/
 *.info.json
 *.description
 *.egg-info
+*.dylib
+*.DS_Store
+*.fm2
