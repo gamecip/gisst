@@ -14,10 +14,6 @@ import re
 import requests
 import json
 import youtube_dl
-from hachoir_core.error import HachoirError
-from hachoir_parser import createParser
-from hachoir_metadata import extractMetadata
-from hachoir_core.cmd_line import unicodeFilename
 
 from utils import (
     pairwise,
@@ -710,6 +706,12 @@ class GenericVideoExtractor(Extractor):
     supports_performances = True
 
     def extract(self):
+        #   Need to import hachoir libraries in local scope because they overwrite sys.stdout / sys.stderr
+        #   when imported, there is a configuration somewhere but I couldn't find it
+        from hachoir_core.error import HachoirError
+        from hachoir_parser import createParser
+        from hachoir_metadata import extractMetadata
+
         extracted_info = {}
 
         filename = self.source.split('/')[-1]

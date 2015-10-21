@@ -28,6 +28,7 @@ from schema import (
     GAME_CITE_REF,
     PERF_CITE_REF
 )
+from app import app
 
 VERSION = '0.1'
 
@@ -42,6 +43,11 @@ def cli(ctx, verbose):
     dbm.connect_to_db() # Connect to or create dbs
     check_for_db_and_data()
 
+
+@cli.command(help='Run local access server for citations.')
+@click.option('--port', help='Specify port for server. (default={}'.format(8100), default=8100)
+def serve(port):
+    app.run(port=port)
 
 @cli.command(help='Extract metadata from a compatible url.')
 @click.argument('uri')
@@ -182,7 +188,8 @@ def extract_file(ctx, path_to_file):
 @click.option('--url', help='Create citation from url.')
 @click.option('--title', help='Create citation from game title.')
 @click.option('--partial', help='Create citation from partial JSON record.')
-@click.option('--schema_version', help='Specify schema version.', default=GAME_SCHEMA_VERSION)
+@click.option('--schema_version', help='Specify schema version (default={}).'.format(GAME_SCHEMA_VERSION),
+              default=GAME_SCHEMA_VERSION)
 @click.pass_context
 def cite_game(ctx, file_path, url, title, partial, export, schema_version):
     verbose = ctx.obj['VERBOSE']
