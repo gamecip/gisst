@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Citations</title>
+</head>
+<body>
+<h2>Game Citations</h2>
+<table>
+    <tr>
+        {% for header in game_headers %}
+        <th>{{header}}</th>
+        {% endfor %}
+    </tr>
+    {% for game in all_game_cites %}
+        <tr>
+            {% for k, v in game.elements.items() %}
+                {% if k == 'uuid'%}
+                    <td><a href="/citation/{{v}}">{{v}}</a></td>
+                {% else %}
+                    <td>{{v}}</td>
+                {% endif %}
+            {% endfor %}
+        </tr>
+    {% endfor %}
+</table>
+<h2>Performance Citations</h2>
+<table>
+    <tr>
+        {% for header in perf_headers %}
+        <th>{{header}}</th>
+        {% endfor %}
+    </tr>
+    {% for perf in all_perf_cites %}
+    <tr>
+        {% for k, v in perf.elements.items() %}
+            {% if k == 'uuid'%}
+                <td><a href="/citation/{{v}}">{{v}}</a></td>
+            {% else %}
+                <td>{{v}}</td>
+            {% endif %}
+        {% endfor %}
+    </tr>
+    {% endfor %}
+</table>
+</body>
+</html>

@@ -20,7 +20,6 @@ def citation_page(uuid):
     perf_ref = dbm.retrieve_perf_ref(uuid)
     derived_performances = dbm.retrieve_derived_performances(uuid)
     previous_performances = dbm.retrieve_performance_chain(uuid)[:-1]
-    performance_video = "/{}/{}.mov".format(perf_ref['replay_source_file_ref'], perf_ref['title'])
     dbm.db.close()
     if game_ref:
         return render_template('citation.html',
@@ -29,6 +28,7 @@ def citation_page(uuid):
                                is_performance=False,
                                derived_performances=derived_performances)
     elif perf_ref:
+        performance_video = "/data/{}/{}.mov".format(perf_ref['replay_source_file_ref'], perf_ref['title'])
         return render_template('citation.html',
                                citeref=perf_ref,
                                is_game=False,
@@ -36,6 +36,17 @@ def citation_page(uuid):
                                previous_performances=previous_performances,
                                performance_video=performance_video)
     return "No record found, sorry."
+
+@app.route("/citations")
+def citations_all_page():
+    dbm.connect_to_db()
+    all_game_cites = [dbm.create_cite_ref_from_db(GAME_CITE_REF, x) for x in dbm.run_query('select * from game_citation')]
+    all_perf_cites = [dbm.create_cite_ref_from_db(PERF_CITE_REF, x) for x in dbm.run_query('select * from performance_citation')]
+    return render_template('citations_main.html',
+                           all_game_cites=all_game_cites,
+                           all_perf_cites=all_perf_cites,
+                           perf_headers=all_perf_cites[0].get_element_names(),
+                           game_headers=all_game_cites[0].get_element_names())
 
 if __name__ == '__main__':
     app.run()
