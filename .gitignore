@@ -11,3 +11,4 @@ data/
 *.dylib
 *.DS_Store
 *.fm2
+*.mov

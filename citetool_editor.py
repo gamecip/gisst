@@ -52,7 +52,7 @@ def cli(ctx, verbose):
 @cli.command(help='Run local access server for citations.')
 @click.option('--port', help='Specify port for server. (default={}'.format(8100), default=8100)
 def serve(port):
-    app.run(port=port)
+    app.run(port=port, debug=True)
 
 @cli.command(help='Extract metadata from a compatible url.')
 @click.argument('uri')

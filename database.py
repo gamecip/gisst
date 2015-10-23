@@ -322,6 +322,19 @@ class DatabaseManager:
         return None
 
     @classmethod
+    def retrieve_perf_ref(cls, perf_uuid):
+        if cls.is_attr_in_db('uuid', perf_uuid, cls.PERFORMANCE_CITATION_TABLE):
+            db_values = cls.retrieve_attr_from_db('uuid', perf_uuid, cls.PERFORMANCE_CITATION_TABLE, limit=1)[0]
+            perf_cite = cls.create_cite_ref_from_db(PERF_CITE_REF, db_values)
+            return perf_cite
+        return None
+
+    @classmethod
+    def retrieve_derived_performances(cls, game_uuid):
+        perfs = cls.retrieve_attr_from_db('game_uuid', game_uuid, cls.PERFORMANCE_CITATION_TABLE)
+        return [cls.create_cite_ref_from_db(PERF_CITE_REF, p_tuple) for p_tuple in perfs if p_tuple != (0,)]
+
+    @classmethod
     def create_cite_ref_from_db(cls, ref_type, db_tuple):
         if ref_type == GAME_CITE_REF:
             db_row_dict = dict(zip(cls.headers[cls.GAME_CITATION_TABLE], db_tuple))

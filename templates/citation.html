@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ citeref['title'] }}</title>
+</head>
+<body>
+    <div id="citationTableHolder">
+        <h1>{{ citeref['title'] }}</h1>
+        <h2>Citation Information</h2>
+        <table>
+            {% for k, v in citeref.elements.items() %}
+            <tr>
+                {% if 'uuid' in k and k != 'uuid' and v %}
+                <td>{{k}}</td><td><a href="/citation/{{v}}">{{ v }}</a></td>
+                {% else %}
+                <td>{{k}}</td><td>{{v}}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% if is_game %}
+    <div id="derivedPerformancesHolder">
+        <h2>Derived Performances</h2>
+        <ul>
+        {% for perf in derived_performances %}
+            <li><a href="/citation/{{ perf['uuid'] }}">{{ perf['title'] }}</a></li>
+        {% endfor%}
+        </ul>
+    </div>
+    {% endif %}
+    {% if is_performance %}
+    <div id="previousPerformancesHolder">
+        <h2>Previous Performances</h2>
+        <ul>
+            {% for perf in previous_performances %}
+            <li><a href="/citation/{{ perf['uuid'] }}">{{ perf['title'] }}</a></li>
+            {% endfor%}
+        </ul>
+    </div>
+    {% endif %}
+    <div id="relatedGames">
+    </div>
+    <div id="relatedPerformances">
+    </div>
+</body>
+</html>
