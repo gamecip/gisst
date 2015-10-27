@@ -25,8 +25,6 @@ from source_utils import (
     SourceError
 )
 from schema import (
-    GAME_SCHEMA,
-    PERFORMANCE_SCHEMA,
     GAME_SCHEMA_VERSION,
     PERF_SCHEMA_VERSION,
     generate_cite_ref,
@@ -40,11 +38,13 @@ VERSION = '0.1'
 
 @click.group()
 @click.option('--verbose', is_flag=True, help='To everything that\'s going on.')
+@click.option('--no-prompts', is_flag=True, help='Turn off all user prompts (use with care).')
 @click.version_option(version=VERSION)
 @click.pass_context
-def cli(ctx, verbose):
+def cli(ctx, verbose, no_prompts):
     ctx.obj = dict()    # Context object that stores application state in dict, could make class at some point
     ctx.obj['VERBOSE'] = verbose
+    ctx.obj['NO_PROMPTS'] = no_prompts
     dbm.connect_to_db() # Connect to or create dbs
     check_for_db_and_data()
 
@@ -59,6 +59,7 @@ def serve(port):
 @click.pass_context
 def extract_uri(ctx, uri):
     verbose = ctx.obj['VERBOSE']
+    no_prompts = ctx.obj['NO_PROMPTS']
     source_name = get_uri_source_name(uri)
     if source_name:
         cond_print(verbose, "Starting extraction of {} source".format(source_name))
@@ -79,14 +80,14 @@ def extract_uri(ctx, uri):
     # input uri, like http -> https. Could check this in the extractor or tell the user that the url is changing.
     # Though if the redirect always happens it wouldn't matter anyway, since the database retains the redirected url
     cond_print(verbose, 'Checking for duplicates...')
-    if has_potential_duplicates(source.url, 'source_uri', dbm.EXTRACTED_TABLE):
+    if not no_prompts and has_potential_duplicates(source.url, 'source_uri', dbm.EXTRACTED_TABLE):
         if settle_for_duplicate(source.url, 'source_uri', dbm.EXTRACTED_TABLE):
             sys.exit(1)
 
     cond_print(verbose, 'Validating URI...')
     # Check if this is a game url for extraction
     if not extractor.validate():
-        if not click.confirm('This doesn\'t appear to be a game related uri. Extract anyway?'):
+        if no_prompts or not click.confirm('This doesn\'t appear to be a game related uri. Extract anyway?'):
             sys.exit(1)
 
     cond_print(verbose, 'Extracting URI...')
@@ -100,20 +101,24 @@ def extract_uri(ctx, uri):
     extracted_info = extractor.extracted_info
 
     # Create citation from extracted information
-    if click.confirm('Create citation from extracted data?'):
+    if no_prompts or click.confirm('Create citation from extracted data?'):
         citation, extracted_options = extractor.create_citation()
-        citation = get_citation_user_input(citation, extracted_options)
-        if citation.ref_type == GAME_CITE_REF:
-            alternate_citation = choose_game_citation(search_locally_with_citation(citation))
-        elif citation.ref_type == PERF_CITE_REF:
-            alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
-        if not alternate_citation:
+        if not no_prompts:
+            citation = get_citation_user_input(citation, extracted_options)
+            if citation.ref_type == GAME_CITE_REF:
+                alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+            elif citation.ref_type == PERF_CITE_REF:
+                alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
+            if not alternate_citation:
+                dbm.add_to_citation_table(citation, fts=True)
+                click.echo('Citation added to database.')
+        else:
             dbm.add_to_citation_table(citation, fts=True)
-            click.echo('Citation added to database.')
 
     if 'errors' not in extracted_info and dbm.add_to_extracted_table(extracted_info):
         cond_print(verbose, "Extraction Successful!")
-        summary_prompt(extracted_info)
+        if not no_prompts:
+            summary_prompt(extracted_info)
     else:
         cond_print(verbose, "Extraction Failed!")
         pprint.pprint(extracted_info)
@@ -126,6 +131,7 @@ def extract_uri(ctx, uri):
 @click.pass_context
 def extract_file(ctx, path_to_file, partial_citation):
     verbose = ctx.obj['VERBOSE']
+    no_prompts = ctx.obj['NO_PROMPTS']
     source_name = get_file_source_name(path_to_file)
 
     # Convert to full path if needed
@@ -133,7 +139,7 @@ def extract_file(ctx, path_to_file, partial_citation):
 
     # Check if there's actually a file there
     if not os.path.isfile(full_path):
-        click.echo("There doesn\' appear to be a readable file at:{}.\nExiting.".format(path_to_file))
+        click.echo("There doesn\'t appear to be a readable file at:{}.\nExiting.".format(path_to_file))
         sys.exit(1)
 
     # Check if it's actually a potentially valid source
@@ -150,13 +156,13 @@ def extract_file(ctx, path_to_file, partial_citation):
     # Check if this is a valid file
     cond_print(verbose, 'Validating File...')
     if not extractor.validate():
-        if not click.confirm('This doesn\'t appear to be a game related file. Extract anyway?'):
+        if no_prompts or click.confirm('This doesn\'t appear to be a game related file. Extract anyway?'):
             sys.exit(1)
 
     # Check for duplicate entries, by hash of source file
     hash = get_file_hash(full_path)
     cond_print(verbose, 'Checking for duplicates...')
-    if has_potential_duplicates(hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
+    if not no_prompts and has_potential_duplicates(hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
         if settle_for_duplicate(hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
             sys.exit(1)
 
@@ -169,23 +175,27 @@ def extract_file(ctx, path_to_file, partial_citation):
 
     extracted_info = extractor.extracted_info
 
-    if click.confirm('Create citation from extracted data?'):
+    if no_prompts or click.confirm('Create citation from extracted data?'):
         citation, extracted_options = extractor.create_citation()
         if partial_citation:
             partial = json.loads(partial_citation)
             citation.elements = merge_dicts(citation.elements, partial['description'])
-        citation = get_citation_user_input(citation, extracted_options)
-        if citation.ref_type == GAME_CITE_REF:
-            alternate_citation = choose_game_citation(search_locally_with_citation(citation))
-        elif citation.ref_type == PERF_CITE_REF:
-            alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
-        if not alternate_citation:
+        if not no_prompts:
+            citation = get_citation_user_input(citation, extracted_options)
+            if citation.ref_type == GAME_CITE_REF:
+                alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+            elif citation.ref_type == PERF_CITE_REF:
+                alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
+            if not alternate_citation:
+                dbm.add_to_citation_table(citation, fts=True)
+                cond_print(verbose, 'Citation added to database.')
+        else:
             dbm.add_to_citation_table(citation, fts=True)
-            click.echo('Citation added to database.')
 
     if 'errors' not in extracted_info and dbm.add_to_extracted_table(extracted_info):
         cond_print(verbose, "Extraction Successful!")
-        summary_prompt(extracted_info)
+        if not no_prompts:
+            summary_prompt(extracted_info)
     else:
         cond_print(verbose, "Extraction Failed!")
         pprint.pprint(extracted_info)
@@ -202,6 +212,7 @@ def extract_file(ctx, path_to_file, partial_citation):
 @click.pass_context
 def cite_game(ctx, file_path, url, title, partial, export, schema_version):
     verbose = ctx.obj['VERBOSE']
+    no_prompts = ctx.obj['NO_PROMPTS']
     alternate_citation = None
 
     # Make sure that only one input flag is used
@@ -213,6 +224,9 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
     # if no input flag
     if not file_path and not url and not title and not partial:
         # Make a brand new citation
+        if no_prompts:
+            cond_print(verbose, 'Cannot create a blank citation with no-prompts flag active.')
+            sys.exit(1)
         cond_print('Creating new citation...\n', verbose)
         citation = get_citation_user_input(generate_cite_ref(GAME_CITE_REF, schema_version))
         cond_print('Searching for similar citations...\n', verbose)
@@ -223,8 +237,9 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
     if file_path:
         extractor = get_extractor_for_file(file_path)
         citation, extracted_options = extractor.create_citation()
-        citation = get_citation_user_input(citation, extracted_options)
-        alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+        if not no_prompts:
+            citation = get_citation_user_input(citation, extracted_options)
+            alternate_citation = choose_game_citation(search_locally_with_citation(citation))
     elif url:
         try:
             source = get_url_source(url)
@@ -238,34 +253,40 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
         while not extractor.extracted_info:
             pass
         citation, extracted_options = extractor.create_citation()
-        citation = get_citation_user_input(citation, extracted_options)
-        alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+        if not no_prompts:
+            citation = get_citation_user_input(citation, extracted_options)
+            alternate_citation = choose_game_citation(search_locally_with_citation(citation))
     elif title:
+        if no_prompts:
+            cond_print(verbose, 'Cannot do citation by title with no-prompts flag active.')
+            sys.exit(1)
         # Try a local citation search
-        citation = choose_game_citation(search_locally_with_game_title(title))
+        alternate_citation = choose_game_citation(search_locally_with_game_title(title))
+        citation = None
 
         # If that didn't work try to search internet
         # Current hard-coded limit as 10, may allow flag for future
-        if not citation:
+        if not alternate_citation:
             citation = choose_game_citation(search_globally_with_game_title(title, limit=10))
 
         # If that didn't work, make a new citation
-        if not citation:
+        if not citation and not alternate_citation:
             citation = generate_cite_ref(GAME_CITE_REF,
                                          GAME_SCHEMA_VERSION,
                                          title=title)
-
-        # Edit the citation if needed
-        citation = get_citation_user_input(citation)
+            # Edit the citation if needed
+            citation = get_citation_user_input(citation)
     elif partial:
         partial_json = json.loads(partial)
         # Create citation based on partial description
         citation = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **partial_json['description'])
-        # Search locally based on partial description
-        alternate_citation = choose_game_citation(search_locally_with_citation(citation))
-        # Search globally if that didn't work
-        if not alternate_citation:
-            citation = choose_game_citation(search_globally_with_game_partial(partial_json))
+
+        if not no_prompts:
+            # Search locally based on partial description
+            alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+            # Search globally if that didn't work
+            if not alternate_citation:
+                citation = choose_game_citation(search_globally_with_game_partial(partial_json))
 
     # If an alternate was found, don't do anything
     if alternate_citation:
@@ -287,6 +308,7 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
 @click.pass_context
 def cite_performance(ctx, export, file_path, url, partial, schema_version):
     verbose = ctx.obj['VERBOSE']
+    no_prompts = ctx.obj['NO_PROMPTS']
     alternate_citation = None
 
     # Make sure that only one input flag is used
@@ -296,6 +318,8 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
         sys.exit(1)
 
     if not file_path and not url and not partial:
+        if no_prompts:
+            cond_print(verbose, 'Cannot create a blank citation with no-prompts flag active.')
         cond_print(verbose, 'Creating a new citation...')
         citation = get_citation_user_input(generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION))
         cond_print(verbose, 'Searching for similar citations...')
@@ -305,8 +329,9 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
         extractor = get_extractor_for_file(file_path)
         extractor.extract()
         citation, extracted_options = extractor.create_citation()
-        citation = get_citation_user_input(citation, extracted_options)
-        alternate_citation = search_locally_with_citation(citation)
+        if not no_prompts:
+            citation = get_citation_user_input(citation, extracted_options)
+            alternate_citation = search_locally_with_citation(citation)
     elif url:
         try:
             source = get_url_source(url)
@@ -319,14 +344,16 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
         while not extractor.extracted_info:
             pass
         citation, extracted_options = extractor.create_citation()
-        citation = get_citation_user_input(citation, extracted_options)
-        alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+        if not no_prompts:
+            citation = get_citation_user_input(citation, extracted_options)
+            alternate_citation = choose_game_citation(search_locally_with_citation(citation))
     elif partial:
         partial_json = json.loads(partial)
         # Create citation based on partial description
         citation = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **partial_json['description'])
         # Search locally based on partial description
-        alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
+        if not no_prompts:
+            alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
 
     if alternate_citation:
         citation = alternate_citation
@@ -339,11 +366,10 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
 
 
 @cli.command(help='Search for citations with a game partial.')
-@click.option('--no_prompts', is_flag=True, help='Run without prompts, just return best guess results.')
 @click.argument('partial_description')
 @click.pass_context
-def search(ctx, partial_description, no_prompts):
-    verbose = ctx.obj['VERBOSE']
+def search(ctx, partial_description):
+    no_prompts = ctx.obj['NO_PROMPTS']
 
     partial_dict = json.loads(partial_description)
     #   For now we are assuming that we will not want to search the extracted data sets
