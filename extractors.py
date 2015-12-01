@@ -715,6 +715,7 @@ class GenericVideoExtractor(Extractor):
         extracted_info = {}
 
         filename = self.source.split('/')[-1]
+        self.source = unicode(self.source)
         parser = createParser(self.source)
         if not parser:
             raise ExtractorError('Unable to parse file.')
