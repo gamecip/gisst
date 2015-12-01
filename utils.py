@@ -2,6 +2,7 @@ __author__ = 'erickaltman'
 
 from itertools import izip, tee
 from functools import wraps
+from collections import OrderedDict
 import timeit
 
 # Pairwise non-overlap function from: http://stackoverflow.com/questions/5389507/iterating-over-every-two-elements-in-a-list
@@ -26,6 +27,13 @@ def merge_dicts(*dict_args):
     result = {}
     for dictionary in dict_args:
         result.update(dictionary)
+    return result
+
+def merge_with_ordered_dict(new_dict, ordered_dict):
+    result = OrderedDict()
+    for k, v in ordered_dict.items():
+        result[k] = v
+    result.update(new_dict)
     return result
 
 

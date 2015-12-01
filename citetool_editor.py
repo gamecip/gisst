@@ -12,7 +12,7 @@ from utils import (
     coroutine,
     bound_array,
     clean_for_sqlite_query,
-    merge_dicts
+    merge_with_ordered_dict
 )
 from extractors import ExtractorError
 from source_utils import (
@@ -38,7 +38,7 @@ VERSION = '0.1'
 
 @click.group()
 @click.option('--verbose', is_flag=True, help='To everything that\'s going on.')
-@click.option('--no-prompts', is_flag=True, help='Turn off all user prompts (use with care).')
+@click.option('--no_prompts', is_flag=True, help='Turn off all user prompts (use with care).')
 @click.version_option(version=VERSION)
 @click.pass_context
 def cli(ctx, verbose, no_prompts):
@@ -179,7 +179,7 @@ def extract_file(ctx, path_to_file, partial_citation):
         citation, extracted_options = extractor.create_citation()
         if partial_citation:
             partial = json.loads(partial_citation)
-            citation.elements = merge_dicts(citation.elements, partial['description'])
+            citation.elements = merge_with_ordered_dict(partial['description'], citation.elements)
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
             if citation.ref_type == GAME_CITE_REF:
