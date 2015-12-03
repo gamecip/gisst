@@ -367,20 +367,33 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
 
 @cli.command(help='Search for citations with a game partial.')
 @click.argument('partial_description')
+@click.option('--game_only', help='Limit search to game citations.', is_flag=True)
+@click.option('--perf_only', help='Limit search to performance citations.', is_flag=True)
 @click.pass_context
-def search(ctx, partial_description):
+def search(ctx, partial_description, game_only, perf_only):
     no_prompts = ctx.obj['NO_PROMPTS']
+
+    if game_only and perf_only:
+        click.echo('Choose either game_only or perf_only flags, not both')
+        sys.exit(1)
 
     partial_dict = json.loads(partial_description)
     #   For now we are assuming that we will not want to search the extracted data sets
-    results = search_locally_with_partial(partial_dict, exclude_ref_types='extracted')
+    if game_only:
+        exclude_refs = ('performance', 'extracted')
+    elif perf_only:
+        exclude_refs = ('game', 'extracted')
+    else:
+        exclude_refs = ('extracted',)
+
+    results = search_locally_with_partial(partial_dict, exclude_ref_types=exclude_refs)
 
     results_dict = prep_search_results(results)
 
     if no_prompts:
         click.echo(json.dumps(results_dict))
     else:
-        if not results:
+        if not results and not perf_only:
             if click.confirm('No results found, search online sources for games?'):
                 citations = search_globally_with_game_partial(partial_dict)
                 results_dict = dict()
