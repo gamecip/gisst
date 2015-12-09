@@ -605,6 +605,7 @@ class YoutubeExtractor(Extractor):
         element_dict = {'start_datetime':datetime.strptime(self.extracted_info['upload_date'], '%Y%m%d'),
                         'replay_source_purl': self.extracted_info['source_uri'],
                         'replay_source_file_ref': self.extracted_info['source_file_hash'],
+                        'replay_source_file_name': self.extracted_info['source_file_name'],
                         'recording_agent': self.extracted_info['uploader'],
                         'title': self.extracted_info['fulltitle'],
                         'description': self.extracted_info['description']}
@@ -615,7 +616,7 @@ class YoutubeExtractor(Extractor):
     # Called when download is finished
     def wrap_up_extraction(self, d):
         if d['status'] == 'finished':
-            filename = d['filename'].split('/')[1].split('.')[0] # Flimsy for now
+            filename = d['filename'].split('/')[1].rpartition('.')[0] # Flimsy for now
             filename_with_ext = d['filename'].split('/')[1]
             hash = save_file_to_extract_store('tmp/{}'.format(filename_with_ext))
             hash_dir = '{}/{}'.format(local_data_store, hash)
@@ -631,6 +632,7 @@ class YoutubeExtractor(Extractor):
             extracted_info['source_uri'] = self.source.url
             extracted_info['source_file_hash'] = hash
             extracted_info['extracted_datetime'] = datetime.now(tz=pytz.utc).isoformat()
+            extracted_info['source_file_name'] = filename_with_ext
 
             # Currently merging everything, might want to be more discriminate
             extracted_info = merge_dicts(info_json, extracted_info) # info_json['title'] -> extracted_info['title']

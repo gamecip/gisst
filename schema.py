@@ -70,6 +70,7 @@ PERFORMANCE_SCHEMA = {
             ('data_events',                     {'required': False}),
             ('replay_source_purl',              {'required': False}),
             ('replay_source_file_ref',          {'required': False}),
+            ('replay_source_file_name',         {'required': False}),
             ('recording_agent',                 {'required': False}),
             ('save_state_source_purl',          {'required': False}),
             ('save_state_source_file_ref',      {'required': False}),

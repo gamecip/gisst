@@ -98,6 +98,7 @@ class DatabaseManager:
             ('data_events',                         'text',                 field_constraint),
             ('replay_source_purl',                  'text',                 field_constraint),
             ('replay_source_file_ref',              'text',                 field_constraint),
+            ('replay_source_file_name',             'text',                 field_constraint),
             ('recording_agent',                     'text',                 field_constraint),
             ('save_state_source_purl',              'text',                 field_constraint),
             ('save_state_source_file_ref',          'text',                 field_constraint),

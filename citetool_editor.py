@@ -5,6 +5,8 @@ import sys
 import os
 import json
 import pprint
+import shutil
+import subprocess
 from math import ceil
 from database import DatabaseManager as dbm
 from database import local_data_store
@@ -52,7 +54,7 @@ def cli(ctx, verbose, no_prompts):
 @cli.command(help='Run local access server for citations.')
 @click.option('--port', help='Specify port for server. (default={}'.format(8100), default=8100)
 def serve(port):
-    app.run(port=port, debug=True)
+    app.run(port=port, debug=True, threaded=True)
 
 @cli.command(help='Extract metadata from a compatible url.')
 @click.argument('uri')
@@ -405,6 +407,81 @@ def search(ctx, partial_description, game_only, perf_only):
             click.echo(json.dumps(results_dict))
 
 
+@cli.command(help='Create a gif from a performance citation.')
+@click.argument('uuid')
+@click.argument('start', type=int)
+@click.argument('end', type=int)
+@click.option('--regenerate', help='Force regeneration even if extract already present.', is_flag=True)
+@click.pass_context
+def gif_performance(ctx, uuid, start, end, regenerate):
+    verbose = ctx.obj['VERBOSE']
+    #   Peformance retrieval
+    perf = dbm.retrieve_perf_ref(uuid)
+
+    if not perf:
+        click.echo('Invalid performance uuid: {}'.format(uuid))
+        sys.exit(1)
+
+    cond_print(verbose, "Found performance: {}, '{}'".format(uuid, perf['title']))
+
+    #   GIF creation
+    gif_source_path = '"{}/{}/{}"'.format(os.path.abspath(local_data_store),
+                                              perf['replay_source_file_ref'],
+                                              perf['replay_source_file_name'])
+    gif_segment_dir = "{}_{}".format(start, end)
+    gif_abs_path = "{}/{}/gif/{}".format(os.path.abspath(local_data_store), perf['replay_source_file_ref'], gif_segment_dir)
+    gif_palette_name = "{}_{}_{}_palette.png".format(uuid, start, end)
+    gif_file_name = "{}_{}_{}.gif".format(uuid, start, end)
+
+    #   All commands are just straight defaults for now, basic settings are:
+    #   FPS: 10
+    #   Height: 320
+    #   Width: Scale to height
+    ffmpeg_palette = '/usr/local/bin/ffmpeg -y -ss {} -t {} -i {} -vf fps=10,scale=320:-1:flags=lanczos,palettegen {}'.format(
+        start,
+        end - start,
+        gif_source_path,
+        "{}/{}".format(gif_abs_path, gif_palette_name)
+    )
+    ffmpeg_gif = '/usr/local/bin/ffmpeg -ss {} -t {} -i {} -i {} -filter_complex "fps=10,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse" {}'.format(
+        start,
+        end - start,
+        gif_source_path,
+        "{}/{}".format(gif_abs_path, gif_palette_name),
+        "{}/{}".format(gif_abs_path, gif_file_name)
+    )
+
+    #   Check if gif is already present, and remove if regenerate flag is set
+    if os.path.isdir(gif_abs_path) and regenerate:
+        cond_print(verbose, "--regenerate flag active, deleting previous gif information")
+        shutil.rmtree(gif_abs_path)
+    elif os.path.isdir(gif_abs_path):
+        click.echo('Gif for that time index already present, please use --regenerate to override this message.')
+        sys.exit(1)
+
+    #   Create gif directory
+    cond_print(verbose, "Creating gif directory at {}".format(gif_abs_path))
+    os.makedirs(gif_abs_path)
+
+    #   Run gif creation processes
+    cond_print(verbose, "Running gif creation processes...")
+    cond_print(verbose, "{}".format(ffmpeg_palette))
+    try:
+        subprocess.check_call(ffmpeg_palette, shell=True)
+    except subprocess.CalledProcessError as e:
+        click.echo(e.message)
+        sys.exit(1)
+
+    cond_print(verbose, "{}".format(ffmpeg_gif))
+    try:
+        subprocess.check_call(ffmpeg_gif, shell=True)
+    except subprocess.CalledProcessError as e:
+        click.echo(e.message)
+        sys.exit(1)
+
+    cond_print(verbose, "Success!")
+
+
 def prep_search_results(results):
 
     def make_performance_package(performance):
@@ -473,7 +550,7 @@ def search_locally_with_citation(citation):
 def search_locally_with_partial(partial, exclude_ref_types=None):
     start_index = int(partial['start_index'])
     limit = int(partial['limit']) if 'limit' in partial else None
-    #   Apparently Python DB API and Sqlite and commas (,) and colons (:) do not play nice with FTS?
+    #   Apparently Python DB API and Sqlite and commas (,), parans ((,)), and colons (:) do not play nice with FTS?
     search_strings = [clean_for_sqlite_query(str(v)) for k, v in partial['description'].items()]
     source_index = dbm.headers[dbm.FTS_INDEX_TABLE].index('source_type')
     uuid_index = dbm.headers[dbm.FTS_INDEX_TABLE].index('uuid')

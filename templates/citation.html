@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <title>{{ citeref['title'] }}</title>
+    <link href="/static/css/video-js.css" rel="stylesheet" type="text/css">
+    <script src="/static/js/video.js"></script>
+    <script src="/static/js/jquery-2.1.4.min.js"></script>
+    <script src="/static/js/gif-maker.js"></script>
 </head>
 <body>
     <div id="citationTableHolder">
@@ -41,7 +45,20 @@
     </div>
     <div id="videoContainer">
         <h2>Video File</h2>
-        <video src="{{ performance_video }}" controls width="360" height="225"></video>
+        <video id="video_file" class="video-js vjs-default-skin" preload="auto" controls width="360" height="225">
+            <source src="{{ performance_video }}" type="video/mp4" />
+        </video>
+        <div id="gifControls">
+            <h3>Gif Creator</h3>
+            <div>
+                <button id="startMarkerButton">Mark Start</button>
+                <p>Start Time: <span id="startTime">0</span></p>
+                <button id="endMarkerButton">Mark End</button>
+                <p>End Time: <span id="endTime">0</span></p>
+                <button id="makeGifButton">Make-a-GIF&reg;</button>
+            </div>
+            <div id="gifDeposit"></div>
+        </div>
     </div>
     {% endif %}
     <div id="relatedGames">
