@@ -9,10 +9,13 @@ from datetime import datetime
 import pytz
 import hashlib
 import shutil
+import pipes
 import os
 import re
+import subprocess
 import requests
 import json
+import StringIO
 import youtube_dl
 
 from utils import (
@@ -31,7 +34,9 @@ from schema import (
 )
 
 from database import (
-    local_data_store
+    LOCAL_CITATION_DATA_STORE,
+    LOCAL_GAME_DATA_STORE,
+    LOCAL_DATA_ROOT
 )
 
 
@@ -43,12 +48,14 @@ from database import (
 # entries in extracted_data db may refer to the same data
 # on the file system.
 
+TEMP_DIRECTORY = u"{}/tmp".format(LOCAL_DATA_ROOT)
+
 # Saves pages linked to a uri in the extract_store
 # hashed by uri and dt string in ISO format
 # Returns hex hash of page_data
 def save_page_to_extract_store(uri, dt, page_data):
     name_hash = hashlib.sha1(uri + dt).hexdigest()
-    hash_dir = "{}/{}".format(local_data_store, name_hash)
+    hash_dir = "{}/{}".format(LOCAL_CITATION_DATA_STORE, name_hash)
 
     # http://stackoverflow.com/questions/273192/in-python-check-if-a-directory-exists-and-create-it-if-necessary
     # Note that not perfect but effective for now
@@ -72,7 +79,7 @@ def save_page_to_extract_store(uri, dt, page_data):
 # Returns hex hash of file
 # NOTE: for now this is using shutil.copy2 see: https://docs.python.org/2/library/shutil.html
 # for note regarding the limitation of these copy functions in relation to system-specific file metadata
-def save_file_to_extract_store(file_path):
+def save_file_to_store(file_path, store_path=None):
 
     # TODO: move the filesystem stuff to specific functions
 
@@ -86,7 +93,11 @@ def save_file_to_extract_store(file_path):
             buf = a_file.read(BLOCKSIZE)
 
     hash = hasher.hexdigest()
-    hash_dir = "{}/{}".format(local_data_store, hash)
+    #   Default to citation data store
+    if not store_path:
+        hash_dir = "{}/{}".format(LOCAL_CITATION_DATA_STORE, hash)
+    else:
+        hash_dir = "{}/{}".format(store_path, hash)
 
     if not os.path.exists(hash_dir):
         os.makedirs(hash_dir)
@@ -574,7 +585,7 @@ class YoutubeExtractor(Extractor):
 
     def extract(self):
         youtube_opts  = {
-            'outtmpl': u'tmp/%(title)s.%(ext)s', # Template location for temporary file storage
+            'outtmpl': u'{}/%(title)s.%(ext)s'.format(TEMP_DIRECTORY), # Template location for temporary file storage
             'writedescription': True, # Write description file to template location
             'writeinfojson': True, # Write JSON info file to template location
             'writeannotations': True, # Write Annotations XML file to template location
@@ -584,8 +595,8 @@ class YoutubeExtractor(Extractor):
         }
 
         # Create tmp directory if not present
-        if not os.path.exists('tmp'):
-            os.makedirs('tmp')
+        if not os.path.exists(TEMP_DIRECTORY):
+            os.makedirs(TEMP_DIRECTORY)
 
         # Call youtube_dl extraction process
         with youtube_dl.YoutubeDL(youtube_opts) as ydl:
@@ -616,16 +627,16 @@ class YoutubeExtractor(Extractor):
     # Called when download is finished
     def wrap_up_extraction(self, d):
         if d['status'] == 'finished':
-            filename = d['filename'].split('/')[1].rpartition('.')[0] # Flimsy for now
-            filename_with_ext = d['filename'].split('/')[1]
-            hash = save_file_to_extract_store('tmp/{}'.format(filename_with_ext))
-            hash_dir = '{}/{}'.format(local_data_store, hash)
+            filename = d['filename'].split('/')[-1].rpartition('.')[0] # Flimsy for now
+            filename_with_ext = d['filename'].split('/')[-1]
+            hash = save_file_to_store('{}/{}'.format(TEMP_DIRECTORY, filename_with_ext))
+            hash_dir = '{}/{}'.format(LOCAL_CITATION_DATA_STORE, hash)
 
-            shutil.copy2('tmp/{}.description'.format(filename), hash_dir)
-            shutil.copy2('tmp/{}.info.json'.format(filename), hash_dir)
-            shutil.copy2('tmp/{}.annotations.xml'.format(filename), hash_dir)
+            shutil.copy2('{}/{}.description'.format(TEMP_DIRECTORY, filename), hash_dir)
+            shutil.copy2('{}/{}.info.json'.format(TEMP_DIRECTORY, filename), hash_dir)
+            shutil.copy2('{}/{}.annotations.xml'.format(TEMP_DIRECTORY, filename), hash_dir)
 
-            with open('tmp/{}.info.json'.format(filename)) as json_file:
+            with open('{}/{}.info.json'.format(TEMP_DIRECTORY, filename)) as json_file:
                 info_json = json.load(json_file)
 
             extracted_info = {}
@@ -638,7 +649,7 @@ class YoutubeExtractor(Extractor):
             extracted_info = merge_dicts(info_json, extracted_info) # info_json['title'] -> extracted_info['title']
 
             # Clean up tmp directory
-            shutil.rmtree('tmp')
+            shutil.rmtree(TEMP_DIRECTORY)
 
             # Signal complete
             self.extracted_info = extracted_info
@@ -694,7 +705,7 @@ class FM2Extractor(Extractor):
 
         extracted_info['title'] = self.source.split('/')[-1] # Just get non-pathed filename
         extracted_info['extracted_datetime'] = datetime.now(tz=pytz.utc).isoformat()
-        extracted_info['source_file_hash'] = save_file_to_extract_store(self.source)
+        extracted_info['source_file_hash'] = save_file_to_store(self.source)
 
         self.extracted_info = extracted_info
 
@@ -740,7 +751,7 @@ class GenericVideoExtractor(Extractor):
         extracted_info['filename'] = filename
         extracted_info['title'] = filename.split('.')[0]
 
-        extracted_info['source_file_hash'] = save_file_to_extract_store(self.source)
+        extracted_info['source_file_hash'] = save_file_to_store(self.source)
 
         self.extracted_info = extracted_info
 
@@ -752,5 +763,128 @@ class GenericVideoExtractor(Extractor):
         citation['start_datetime'] = self.extracted_info['creation_date']
         return citation, {}
 
+    def validate(self):
+        return True
+
+
+#   ROM Extractors
+
+def parse_ucon64_output(ucon64_buffer, headers, rom_source_index, info_start_index, k_v_index):
+    parse_data = {}
+    in_dat_info = False
+    dat_count = 0
+    for index, line in enumerate(ucon64_buffer.readlines()):
+        if index < k_v_index:  # Non-keyed header lines
+            if index == rom_source_index: parse_data['rom_image_source'] = line.strip()
+            elif index == info_start_index: parse_data['platform'] = line.strip()
+            elif index == info_start_index + 1: parse_data['title'] = line.strip()
+            elif index == info_start_index + 2: parse_data['publisher'] = line.strip()
+            elif index == info_start_index + 3: parse_data['localization_region'] = line.strip()
+            elif index == info_start_index + 4: parse_data['rom_size'] = line.strip()
+        else:           # in header lines or .dat file description
+            key, value = line.split(':') if not in_dat_info else (None, None)
+            if key in headers:
+                # Check if in DAT info at end of file
+                if key == 'DAT info':
+                    in_dat_info = True
+                    continue    # start counting dat lines on next iteration
+                else:
+                    parse_data[key] = value.strip()
+
+            if in_dat_info:
+                if dat_count == 1:
+                    parse_data['rom_title'] = line.strip()
+                elif dat_count == 4:
+                    parse_data['dat_info'] = line.strip()
+                dat_count += 1
+    return parse_data
+
+
+
+class SMCExtractor(Extractor):
+    headers = ('Padded', r'Interleaved/Swapped', r'Backup unit/emulator header',
+               'HiROM', 'Internal size', 'ROM type', 'ROM speed', 'SRAM',
+               'Version', 'Checksum', 'Inverse checksum', r'Checksum (CRC32)',
+               'DAT info')
+
+    def extract(self):
+        full_path = pipes.quote(os.path.abspath(self.source))
+
+        #   Prep Ucon64 and parse Ucon64 output
+        proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)
+        parse_data = parse_ucon64_output(proc.stdout, self.headers, 6, 12, 18)
+
+        #   Copy file information to appropriate extracted fields
+        parse_data['version'] = parse_data['Version']
+        parse_data['data_image_checksum'] = parse_data['Checksum (CRC32)']
+        parse_data['data_image_checksum_type'] = 'crc32'
+
+        #   Save rom data to game_data store
+        parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
+        parse_data['data_image_source'] = full_path.split('/')[-1]
+        self.extracted_info = parse_data
+
+    def create_citation(self):
+        citation = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION)
+        cite_map = (('Version', 'version'),
+                    ('title', 'title'),
+                    ('publisher', 'publisher'),
+                    ('localization_region', 'localization_region'),
+                    ('platform', 'platform'),
+                    ('data_image_checksum', 'data_image_checksum'),
+                    ('data_image_checksum_type', 'data_image_checksum_type'),
+                    ('data_image_source', 'data_image_source'),
+                    ('source_data', 'source_data'))
+        for extract_key, schema_key in cite_map:
+            citation[schema_key] = self.extracted_info[extract_key]
+
+        return citation, {}
+
+    #   Validates always since file name checked out
+    def validate(self):
+        return True
+
+
+class NESExtractor(Extractor):
+    headers = ('Padded', 'Interleaved/Swapped', 'Backup unit/emulator header',
+               'Internal size', 'Internal PRG size', 'Internal CHR size',
+               'Memory mapper (iNES)', 'Television standard', 'Mirroring',
+               'Cartridge RAM', 'Save RAM', '512-byte trainer', 'VS-System',
+               'Date', 'Checksum (CRC32)', 'DAT info')
+
+    def extract(self):
+        full_path = pipes.quote(os.path.abspath(self.source))
+
+        #   Prep Ucon64 and parse Ucon64 output
+        proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)
+        parse_data = parse_ucon64_output(proc.stdout, self.headers, 8, 10, 16)
+
+        #   Copy file information to appropriate extracted fields
+        parse_data['data_image_checksum'] = parse_data['Checksum (CRC32)']
+        parse_data['data_image_checksum_type'] = 'crc32'
+        parse_data['date_published'] = datetime.strptime(parse_data['Date'], "%m/%Y").isoformat()
+
+        #   Save rom data to game_data store
+        parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
+        parse_data['data_image_source'] = full_path.split('/')[-1]
+        self.extracted_info = parse_data
+
+    def create_citation(self):
+        citation = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION)
+        cite_map = (('title', 'title'),
+                    ('publisher', 'publisher'),
+                    ('localization_region', 'localization_region'),
+                    ('platform', 'platform'),
+                    ('data_image_checksum', 'data_image_checksum'),
+                    ('data_image_checksum_type', 'data_image_checksum_type'),
+                    ('data_image_source', 'data_image_source'),
+                    ('date_published', 'date_published'),
+                    ('source_data', 'source_data'))
+        for extract_key, schema_key in cite_map:
+            citation[schema_key] = self.extracted_info[extract_key]
+
+        return citation, {}
+
+    #   Again, if file extension works, then we're good for now
     def validate(self):
         return True

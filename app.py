@@ -3,6 +3,7 @@ import os
 import re
 import mimetypes
 import subprocess
+import json
 from flask import Flask, Blueprint, redirect, request, url_for, Response
 from flask import render_template, send_file, jsonify
 from database import DatabaseManager as dbm
@@ -16,16 +17,55 @@ from schema import (
 
 
 app = Flask(__name__)
-data_source = Blueprint('data_source', __name__, static_folder='./data')
-app.register_blueprint(data_source)
+local_cite_data_path = os.path.expanduser("~/Library/Application Support/citetool-editor/cite_data")
+local_game_data_path = os.path.expanduser("~/Library/Application Support/citetool-editor/game_data")
+cite_data_source = Blueprint('cite_data_source', __name__, static_url_path='/cite_data', static_folder=local_cite_data_path)
+game_data_source = Blueprint('game_data_source', __name__, static_url_path='/game_data', static_folder=local_game_data_path)
+app.register_blueprint(cite_data_source)
+app.register_blueprint(game_data_source)
 
 @app.route("/")
 def start_page():
     return "Main page coming soon..."
 
-@app.route('/data/<source_hash>/<filename>')
-def data(source_hash, filename):
-    return send_file_partial("./data/{}/{}".format(source_hash, filename))
+@app.route('/cite_data/<source_hash>/<filename>')
+def cite_data(source_hash, filename):
+    return send_file_partial("{}/{}/{}".format(local_cite_data_path, source_hash, filename))
+
+@app.route('/game_data/<source_hash>/<filename>')
+def game_data(source_hash, filename):
+    return send_file_partial("{}/{}/{}".format(local_game_data_path, source_hash, filename))
+
+@app.route('/search')
+def search():
+    search_string = request.args.get('search_query', '')
+    search_type = request.args.get('search_type', '')
+    if search_string:
+        search_json = json.dumps({'start_index':0, 'description':{'title': search_string}})
+        if not search_type or search_type == 'all':
+            proc_args = ['citetool_editor', '--no_prompts', 'search', search_json]
+        elif search_type == 'game':
+            proc_args = ['citetool_editor', '--no_prompts', 'search', '--game_only', search_json]
+        elif search_type == 'performance':
+            proc_args = ['citetool_editor', '--no_prompts', 'search', '--perf_only', search_json]
+
+
+        results = json.loads(subprocess.check_output(proc_args))
+        results['games'] = map(lambda d: dict((i, d[i]) for i in d if i != 'schema_version'), results['games'])
+        results['performances'] = map(lambda d: dict((i, d['performance'][i]) for i in d['performance'] if i != 'schema_version'), results['performances'])
+        game_results = map(lambda x: generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **x), results['games'])
+        performance_results = map(lambda x: generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **x), results['performances'])
+    else:
+        game_results = []
+        performance_results = []
+
+    return render_template('search.html',
+                           game_results=game_results,
+                           performance_results=performance_results,
+                           source_type=search_type,
+                           prev_query=search_string,
+                           total_results=len(game_results) + len(performance_results))
+
 
 @app.route("/citation/<uuid>")
 def citation_page(uuid):
@@ -42,8 +82,8 @@ def citation_page(uuid):
                                is_performance=False,
                                derived_performances=derived_performances)
     elif perf_ref:
-        performance_video = "/data/{}/{}".format(perf_ref['replay_source_file_ref'],
-                                                 perf_ref['replay_source_file_name'])
+        performance_video = "/cite_data/{}/{}".format(perf_ref['replay_source_file_ref'],
+                                                      perf_ref['replay_source_file_name'])
         return render_template('citation.html',
                                citeref=perf_ref,
                                is_game=False,
@@ -96,7 +136,7 @@ def gif():
 
     subprocess.call(["citetool_editor", "gif_performance", "--regenerate", uuid, start, end])
 
-    location_info = {'gif_location': '/data/{0}/gif/{1}_{2}/{3}_{1}_{2}.gif'.format(
+    location_info = {'gif_location': '/cite_data/{0}/gif/{1}_{2}/{3}_{1}_{2}.gif'.format(
         source_hash,
         start,
         end,
@@ -114,7 +154,7 @@ if __name__ == '__main__':
 def after_request(response):
     response.headers.add('Accept-Ranges', 'bytes')
     return response
-
+#   Ditto to above source
 def send_file_partial(path):
     """
         Simple wrapper around send_file which handles HTTP 206 Partial Content

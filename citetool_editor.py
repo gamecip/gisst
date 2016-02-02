@@ -1,5 +1,3 @@
-__author__ = 'erickaltman'
-
 import click
 import sys
 import os
@@ -9,7 +7,11 @@ import shutil
 import subprocess
 from math import ceil
 from database import DatabaseManager as dbm
-from database import local_data_store
+from database import (
+    LOCAL_CITATION_DATA_STORE,
+    LOCAL_GAME_DATA_STORE,
+    LOCAL_DATA_ROOT,
+)
 from utils import (
     coroutine,
     bound_array,
@@ -36,6 +38,7 @@ from schema import (
 from app import app
 
 VERSION = '0.1'
+__author__ = 'erickaltman'
 
 
 @click.group()
@@ -47,6 +50,8 @@ def cli(ctx, verbose, no_prompts):
     ctx.obj = dict()    # Context object that stores application state in dict, could make class at some point
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['NO_PROMPTS'] = no_prompts
+    check_for_data_root()
+    check_for_fts_lib() #   Hack right now, will change
     dbm.connect_to_db() # Connect to or create dbs
     check_for_db_and_data()
 
@@ -162,10 +167,10 @@ def extract_file(ctx, path_to_file, partial_citation):
             sys.exit(1)
 
     # Check for duplicate entries, by hash of source file
-    hash = get_file_hash(full_path)
+    file_hash = get_file_hash(full_path)
     cond_print(verbose, 'Checking for duplicates...')
-    if not no_prompts and has_potential_duplicates(hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
-        if settle_for_duplicate(hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
+    if not no_prompts and has_potential_duplicates(file_hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
+        if settle_for_duplicate(file_hash, 'source_file_hash', dbm.EXTRACTED_TABLE):
             sys.exit(1)
 
     cond_print(verbose, 'Extracting URI...')
@@ -237,7 +242,8 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
 
     # If file path is specified, get the correct extractor
     if file_path:
-        extractor = get_extractor_for_file(file_path)
+        extractor = get_extractor_for_file(os.path.expanduser(file_path))
+        extractor.extract()
         citation, extracted_options = extractor.create_citation()
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
@@ -301,6 +307,7 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
     if export and citation:
         click.echo(citation.to_json_string())
 
+
 @cli.command(help='Create a performance citation.')
 @click.option('--export', help='Return citation JSON string.', is_flag=True)
 @click.option('--file_path', help='Create citation from local file.')
@@ -328,7 +335,7 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
         alternate_citation = choose_performance_citation(search_locally_with_citation(citation))
 
     if file_path:
-        extractor = get_extractor_for_file(file_path)
+        extractor = get_extractor_for_file(os.path.expanduser(file_path))
         extractor.extract()
         citation, extracted_options = extractor.create_citation()
         if not no_prompts:
@@ -425,11 +432,13 @@ def gif_performance(ctx, uuid, start, end, regenerate):
     cond_print(verbose, "Found performance: {}, '{}'".format(uuid, perf['title']))
 
     #   GIF creation
-    gif_source_path = '"{}/{}/{}"'.format(os.path.abspath(local_data_store),
-                                              perf['replay_source_file_ref'],
-                                              perf['replay_source_file_name'])
+    gif_source_path = "'{}/{}/{}'".format(os.path.abspath(LOCAL_CITATION_DATA_STORE),
+                                          perf['replay_source_file_ref'],
+                                          perf['replay_source_file_name'])
     gif_segment_dir = "{}_{}".format(start, end)
-    gif_abs_path = "{}/{}/gif/{}".format(os.path.abspath(local_data_store), perf['replay_source_file_ref'], gif_segment_dir)
+    gif_abs_path = "{}/{}/gif/{}".format(os.path.abspath(LOCAL_CITATION_DATA_STORE),
+                                         perf['replay_source_file_ref'],
+                                         gif_segment_dir)
     gif_palette_name = "{}_{}_{}_palette.png".format(uuid, start, end)
     gif_file_name = "{}_{}_{}.gif".format(uuid, start, end)
 
@@ -441,14 +450,14 @@ def gif_performance(ctx, uuid, start, end, regenerate):
         start,
         end - start,
         gif_source_path,
-        "{}/{}".format(gif_abs_path, gif_palette_name)
+        "'{}/{}'".format(gif_abs_path, gif_palette_name)
     )
     ffmpeg_gif = '/usr/local/bin/ffmpeg -ss {} -t {} -i {} -i {} -filter_complex "fps=10,scale=320:-1:flags=lanczos[x];[x][1:v]paletteuse" {}'.format(
         start,
         end - start,
         gif_source_path,
-        "{}/{}".format(gif_abs_path, gif_palette_name),
-        "{}/{}".format(gif_abs_path, gif_file_name)
+        "'{}/{}'".format(gif_abs_path, gif_palette_name),
+        "'{}/{}'".format(gif_abs_path, gif_file_name)
     )
 
     #   Check if gif is already present, and remove if regenerate flag is set
@@ -490,7 +499,7 @@ def prep_search_results(results):
         pack['game'] = game.elements if game else None
         pack['performance'] = performance.elements
         #   Last performance is current performance
-        pack['previous_performances'] = [x.elements for x in dbm.retrieve_performance_chain(performance['uuid'])[:-1]]
+        pack['previous_performances'] = [i.elements for i in dbm.retrieve_performance_chain(performance['uuid'])[:-1]]
         return pack
 
     results_dict = dict()
@@ -551,7 +560,7 @@ def search_locally_with_partial(partial, exclude_ref_types=None):
     start_index = int(partial['start_index'])
     limit = int(partial['limit']) if 'limit' in partial else None
     #   Apparently Python DB API and Sqlite and commas (,), parans ((,)), and colons (:) do not play nice with FTS?
-    search_strings = [clean_for_sqlite_query(str(v)) for k, v in partial['description'].items()]
+    search_strings = [clean_for_sqlite_query(unicode(v)) for k, v in partial['description'].items()]
     source_index = dbm.headers[dbm.FTS_INDEX_TABLE].index('source_type')
     uuid_index = dbm.headers[dbm.FTS_INDEX_TABLE].index('uuid')
 
@@ -601,7 +610,7 @@ def search_globally_with_game_title(title, limit=None):
 
 
 def search_globally_with_game_partial(citation_partial):
-    citations= []
+    citations = []
     NEW = 'new'
     OLD = 'old'
 
@@ -699,9 +708,9 @@ def cond_print(condition, message):
 def summary_prompt(info):
     while 1:
         show_info = prompt_input("Show info? (f)ull / (s)ummary / (n)o", ('f', 'F', 's', 'S', 'n', 'N'))
-        if show_info in ('f','F'):
+        if show_info in ('f', 'F'):
             click.echo(pprint.pformat(info, indent=2))
-        elif show_info in ('s','S'):
+        elif show_info in ('s', 'S'):
             click.echo(pprint.pformat(info, indent=2, depth=1))
         break
 
@@ -718,9 +727,12 @@ def get_duplicates(value, field, table_name):
 def settle_for_duplicate(value, field, table_name):
     dups = get_duplicates(value, field, table_name)
     while 1:
-        answer = prompt_input('{} potential duplicate{} found. (v)iew / (i)gnore? / (q)uit?'.format(len(dups),
-                                                                                                    's' if not len(dups) == 1 else ''),
-                              ('V', 'v', 'I', 'i', 'Q', 'q'))
+        answer = prompt_input('{} potential duplicate{} found. (v)iew / (i)gnore? / (q)uit?'.format(
+            len(dups),
+            's' if not len(dups) == 1 else ''),
+            ('V', 'v', 'I', 'i', 'Q', 'q')
+        )
+
         if answer in ('V', 'v'):
             dup_list = ""
             for i, dup in enumerate(dups):
@@ -728,7 +740,8 @@ def settle_for_duplicate(value, field, table_name):
             while 1:
                 click.echo(dup_list)
                 sel_indices = map(str, range(1, len(dups) + 1))
-                c_s = 'Choose a number to view [{}], (c)ontinue extraction or (q)uit'.format('1-{}'.format(len(dups)) if len(dups) > 1 else '1')
+                c_s = 'Choose a number to view [{}], (c)ontinue extraction or (q)uit'.format(
+                    '1-{}'.format(len(dups)) if len(dups) > 1 else '1')
                 sel = prompt_input(c_s, ['C', 'c', 'Q', 'q'] + sel_indices)
                 if sel in ('Q', 'q'):
                     break
@@ -757,17 +770,62 @@ def prompt_input(prompt_text, options):
         else:
             return s
 
+def check_for_data_root():
+    if not os.path.exists(LOCAL_DATA_ROOT):
+        click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
+        os.makedirs(LOCAL_DATA_ROOT)
 
-# Currently assumes user will want this to be created
-# TODO: allow user defined extracted data root
 def check_for_db_and_data():
     # Check for tables, extracted, game citation and performance citation
     dbm.create_tables()
 
     # Check for data directory
-    if not os.path.exists(local_data_store):
-        click.echo("Local extract store: '{}' not found, creating...".format(local_data_store))
-        os.makedirs(local_data_store)
+    for data_path, path_name in ((LOCAL_GAME_DATA_STORE, "game data"), (LOCAL_CITATION_DATA_STORE, "citation data")):
+        if not os.path.exists(data_path):
+            click.echo("Local {} store: '{}' not found, creating...".format(path_name, data_path))
+            os.makedirs(data_path)
+
+def check_for_fts_lib():
+    if os.path.exists(dbm.FTS_EXT_PATH):
+        pass
+    else:
+        if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib"):
+            click.echo("Copying fts5.dylib to {}".format(LOCAL_DATA_ROOT))
+            shutil.copy(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib", LOCAL_DATA_ROOT)
+        else:
+            click.echo("Please put ft5.dylib into {} and run citetool-editor again.".format(LOCAL_DATA_ROOT))
+
+
+@cli.command(help='Clear local data')
+@click.option('--ignore_game_data', help="Clear everything but local game data files.")
+@click.pass_context
+def clear(ctx, ignore_game_data):
+    no_prompts = ctx.obj['NO_PROMPTS']
+
+    if no_prompts:
+        clear_local_data(ignore_game_data)
+    else:
+        conf_message = "all" if not ignore_game_data else "all citation"
+        if click.confirm("Warning: This will erase {} data. Are you sure? ".format(conf_message)):
+            clear_local_data(ignore_game_data)
+
+
+def clear_local_data(ignore_game_data=False):
+    if os.path.exists(LOCAL_DATA_ROOT):
+        if ignore_game_data:
+            try:
+                shutil.rmtree(LOCAL_CITATION_DATA_STORE)
+            except OSError as e:
+                click.echo(e.message)
+
+            dbm.delete_db()
+        else:
+            try:
+                shutil.rmtree(LOCAL_DATA_ROOT)
+            except OSError as e:
+                click.echo(e.message)
+    else:
+        click.echo("No local data found, exiting.")
 
 # Needed for testing as script for debugging, not used when run as a command
 if __name__ == '__main__':

@@ -14,11 +14,11 @@ from schema import (
 )
 from utils import bound_array
 
-db_file_name = 'cte_local.db'
-db_test_file_name = 'test_cte_local.db'
-
-local_data_store = 'data'
-
+LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
+DB_FILE_NAME = '{}/cite.db'.format(LOCAL_DATA_ROOT)
+DB_TEST_FILE_NAME = 'test_cite.db'
+LOCAL_CITATION_DATA_STORE = '{}/cite_data'.format(LOCAL_DATA_ROOT)
+LOCAL_GAME_DATA_STORE = '{}/game_data'.format(LOCAL_DATA_ROOT)
 
 #   Database utility functions, might move somewhere else if there are too many
 def foreign_key(foreign_table_name, key_name):
@@ -43,7 +43,7 @@ class DatabaseManager:
     GAME_CITATION_TABLE = 'game_citation'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     FTS_INDEX_TABLE = 'fts_index_table'
-    FTS_EXT_PATH = './fts5.dylib'
+    FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
 
     #   Relations
     AND = ' and '
@@ -78,6 +78,7 @@ class DatabaseManager:
             ('date_published',      'datetime',             field_constraint),
             ('localization_region', 'text',                 field_constraint),
             ('version',             'text',                 field_constraint),
+            ('data_image_checksum_type', 'text',                 field_constraint),
             ('data_image_checksum', 'text',                 field_constraint),
             ('data_image_source',   'text',                 field_constraint),
             ('notes',               'text',                 field_constraint),
@@ -132,11 +133,11 @@ class DatabaseManager:
     @classmethod
     def connect_to_db(cls, test=False):
         if test:
-            DatabaseManager.db = sqlite3.connect(db_test_file_name)
-            DatabaseManager.current_db_file = db_test_file_name
+            DatabaseManager.db = sqlite3.connect(DB_TEST_FILE_NAME)
+            DatabaseManager.current_db_file = DB_TEST_FILE_NAME
         else:
-            DatabaseManager.db = sqlite3.connect(db_file_name)
-            DatabaseManager.current_db_file = db_file_name
+            DatabaseManager.db = sqlite3.connect(DB_FILE_NAME)
+            DatabaseManager.current_db_file = DB_FILE_NAME
         DatabaseManager.cur = DatabaseManager.db.cursor()
         # SQLite requires setting foreign key constraint flag on EVERY connection
         DatabaseManager.run_query('PRAGMA foreign_keys = ON')

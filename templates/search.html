@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Search</title>
+    <link href="/static/css/citetool_editor.css" rel="stylesheet" type="text/css">
+</head>
+<body>
+    <form action="search">
+        <input id="search_text_box" name="search_query" type="text"/>
+        <div id="search_select_radio_group">
+            <input class="search_select_radio" name="search_type" type="radio" value="all" checked> All
+            <input class="search_select_radio" name="search_type" type="radio" value="game"> Games Only
+            <input class="search_select_radio" name="search_type" type="radio" value="performance"> Performances Only
+        </div>
+        <input id="search_submit_button" type="submit" value="Search" />
+    </form>
+
+    <div id="search_previous_query">
+        Showing {{ total_results }} results from query: <span class="search_query_text">"{{ prev_query }}"</span> Option: {{ source_type.capitalize() }}
+    </div>
+
+    {% if game_results %}
+    <h3>Game Citations</h3>
+        <div id="search_game_results_table">
+            <table>
+                {% for result in game_results %}
+                <tr>
+                    {% for k, v in result.elements.items() %}
+                        {% if k == 'uuid'%}
+                            <td><a href="/citation/{{v}}">{{v}}</a></td>
+                        {% else %}
+                            <td>{{v}}</td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    {% endif%}
+
+    {% if performance_results %}
+    <h3>Performance Citations</h3>
+        <div id="search_performance_results_table">
+            <table>
+                {% for result in performance_results %}
+                <tr>
+                    {% for k, v in result.elements.items() %}
+                        {% if k == 'uuid'%}
+                            <td><a href="/citation/{{v}}">{{v}}</a></td>
+                        {% else %}
+                            <td>{{v}}</td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    {% endif%}
+
+</body>
+</html>

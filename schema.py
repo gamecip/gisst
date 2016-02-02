@@ -36,22 +36,23 @@ GAME_SCHEMA = {
     'version': {'0.1.0':
         {
             'elements': [
-                ('title',                {'required': True}),
-                ('uuid',                 {'required': True}),
-                ('platform',             {'required': False}),
-                ('developer',            {'required': False}),
-                ('publisher',            {'required': False}),
-                ('distributor',          {'required': False}),
-                ('copyright_year',       {'required': False}),
-                ('date_published',       {'required': False}),
-                ('localization_region',  {'required': False}),
-                ('version',              {'required': False}),
-                ('data_image_checksum',  {'required': False}),
-                ('data_image_source',    {'required': False}),
-                ('notes',                {'required': False}),
-                ('source_url',           {'required': False}),
-                ('source_data',          {'required': False}),
-                ('schema_version',       {'required': True,
+                ('title',                       {'required': True}),
+                ('uuid',                        {'required': True}),
+                ('platform',                    {'required': False}),
+                ('developer',                   {'required': False}),
+                ('publisher',                   {'required': False}),
+                ('distributor',                 {'required': False}),
+                ('copyright_year',              {'required': False}),
+                ('date_published',              {'required': False}),
+                ('localization_region',         {'required': False}),
+                ('version',                     {'required': False}),
+                ('data_image_checksum_type',    {'required': False}),
+                ('data_image_checksum',         {'required': False}),
+                ('data_image_source',           {'required': False}),
+                ('notes',                       {'required': False}),
+                ('source_url',                  {'required': False}),  # Source of citation information
+                ('source_data',                 {'required': False}),  # Data from source of citation information (documentation)
+                ('schema_version',              {'required': True,
                                           'default': '0.1.0'}),
             ]
         }
@@ -132,7 +133,7 @@ class CiteRef(object):
         return json.dumps(json_dict)
 
     def to_pretty_string(self):
-        return "\n".join(["{} : {}".format(e, v) for e, v in self.elements.items()])
+        return u"\n".join([u"{} : {}".format(e, v) for e, v in self.elements.items()])
 
     def __repr__(self):
         return str(self.elements)
