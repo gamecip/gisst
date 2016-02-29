@@ -3,10 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <title>{{ citeref['title'] }}</title>
-    <link href="/static/css/video-js.css" rel="stylesheet" type="text/css">
-    <script src="/static/js/video.js"></script>
+    <!-- <link href="/static/css/video-js.css" rel="stylesheet" type="text/css">
+    <script src="/static/js/video.js"></script> -->
+    <link href="/static/css/citetool_editor.css" rel="stylesheet" type="text/css">
     <script src="/static/js/jquery-2.1.4.min.js"></script>
-    <script src="/static/js/gif-maker.js"></script>
+    <!-- <script src="/static/js/gif-maker.js"></script> -->
+    <script src="/static/js/citestate.js"></script>
+
+    {% if citeref['source_data'] or main_executable %}
+    <script>
+        $(function (){
+            var emHolder = document.getElementById("emulatorHolder");
+            function setupEmulation(event){
+                emHolder.innerHTML = "";
+                emHolder.removeEventListener('click', setupEmulation);
+                CiteState.cite("emulatorHolder", function (emu){
+                    window.emu = emu;
+                }, "{{ main_executable }}"
+                {% if path_dict_string %}
+                , null , {{ path_dict_string }}
+                {% endif %}
+                );
+            }
+            emHolder.addEventListener('click', setupEmulation);
+        });
+    </script>
+    {% endif %}
 </head>
 <body>
     <div id="citationTableHolder">
@@ -24,6 +46,11 @@
             {% endfor %}
         </table>
     </div>
+    <!-- if you have access to emulatable data -->
+    {% if citeref['source_data'] or extra_files %}
+    <div id="emulatorHolder">Click to Run Emulation.</div>
+    {% endif %}
+
     {% if is_game %}
     <div id="derivedPerformancesHolder">
         <h2>Derived Performances</h2>
@@ -31,6 +58,14 @@
         {% for perf in derived_performances %}
             <li><a href="/citation/{{ perf['uuid'] }}">{{ perf['title'] }}</a></li>
         {% endfor%}
+        </ul>
+    </div>
+    <div id="saveStatesHolder">
+        <h2>Save States</h2>
+        <ul>
+            {% for state in save_states %}
+                <li><a href="/play/{{ state['game_uuid']}}?init_state={{ state['uuid']}}">{{ state['description'] }}</a></li>
+            {% endfor %}
         </ul>
     </div>
     {% endif %}
@@ -61,6 +96,18 @@
         </div>
     </div>
     {% endif %}
+    {% if extra_files %}
+    <div id="extraFiles">
+        <h2>Dependent Files</h2>
+        <ul>
+            <li>
+                {% for file in extra_files %}
+                {{ file['file_path'] + ", " }}
+                {% endfor%}
+            </li>
+        </ul>
+    </div>
+    {% endif%}
     <div id="relatedGames">
     </div>
     <div id="relatedPerformances">

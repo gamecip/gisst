@@ -20,3 +20,14 @@
 
 #search_result_range_text {
 }
+
+#emulatorHolder {
+    height: 240px;
+    width: 256px
+}
+
+/* Play Page */
+#emulator {
+    height: 480px;
+    width: 512px;
+}

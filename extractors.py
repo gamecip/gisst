@@ -6,6 +6,7 @@ __author__ = 'erickaltman'
 import bs4
 import base64
 from datetime import datetime
+import calendar
 import pytz
 import hashlib
 import shutil
@@ -17,7 +18,7 @@ import requests
 import json
 import StringIO
 import youtube_dl
-
+from collections import OrderedDict
 from utils import (
     pairwise,
     pairwise_overlap,
@@ -36,8 +37,9 @@ from schema import (
 from database import (
     LOCAL_CITATION_DATA_STORE,
     LOCAL_GAME_DATA_STORE,
-    LOCAL_DATA_ROOT
+    LOCAL_DATA_ROOT,
 )
+from database import DatabaseManager as dbm
 
 
 # General Utils
@@ -75,13 +77,39 @@ def save_page_to_extract_store(uri, dt, page_data):
     return name_hash
 
 
+def get_byte_array_hash(b_array):
+    hasher = hashlib.sha1()
+    hasher.update(b_array)
+    return hasher.hexdigest()
+
+def save_byte_array_to_store(b_array, file_name=None, store_path=None):
+    hasher = hashlib.sha1()
+    hasher.update(b_array)
+    hash = hasher.hexdigest()
+
+    if not store_path:
+        hash_dir = "{}/{}".format(LOCAL_CITATION_DATA_STORE, hash)
+    else:
+        hash_dir = "{}/{}".format(store_path, hash)
+
+    if not os.path.exists(hash_dir):
+        os.makedirs(hash_dir)
+
+    if not file_name:
+        file_name = "{}_{}".format(hash, calendar.timegm(datetime.utcnow().timetuple()))
+
+    f = open("{}/{}".format(hash_dir, file_name), "wb")
+    f.write(b_array)
+    f.close()
+
+    return hash, file_name
+
+
 # Save arbitrary file to extract store
 # Returns hex hash of file
 # NOTE: for now this is using shutil.copy2 see: https://docs.python.org/2/library/shutil.html
 # for note regarding the limitation of these copy functions in relation to system-specific file metadata
 def save_file_to_store(file_path, store_path=None):
-
-    # TODO: move the filesystem stuff to specific functions
 
     # http://pythoncentral.io/hashing-files-with-python/
     BLOCKSIZE = 65536
@@ -121,7 +149,7 @@ class Extractor(object):
         self.source = source
         self.extracted_info = None
 
-    def extract(self):
+    def extract(self, options=None):
         raise NotImplementedError
 
     def validate(self):
@@ -166,7 +194,7 @@ class WikipediaExtractor(Extractor):
     # Rewrite at some point? Needed bi-directional map, probably should list of tuples
     headers_to_terms = dict([(value, key) for key, value in headers.items()])
 
-    def extract(self):
+    def extract(self, options=None):
         extracted_info = {}
 
         s = bs4.BeautifulSoup(self.source.text, 'html.parser')
@@ -237,7 +265,7 @@ class MobyGamesExtractor(Extractor):
     platform_uri_regex = r'/game/[a-z0-9\-]+/[a-z0-9\-]+'
     general_game_uri_regex = r'/game/[a-z0-9\-]+'
 
-    def extract(self):
+    def extract(self, options=None):
 
         # Figure out if specific or general url
         # /game/{platform}/{game name} is specific, otherwise /game/{game name}
@@ -570,7 +598,7 @@ class MobyGamesExtractor(Extractor):
 
 class GiantBombExtractor(Extractor):
 
-    def extract(self):
+    def extract(self, options=None):
         pass
 
     def validate(self):
@@ -583,7 +611,7 @@ class YoutubeExtractor(Extractor):
     supports_performances = True
 
 
-    def extract(self):
+    def extract(self, options=None):
         youtube_opts  = {
             'outtmpl': u'{}/%(title)s.%(ext)s'.format(TEMP_DIRECTORY), # Template location for temporary file storage
             'writedescription': True, # Write description file to template location
@@ -658,7 +686,7 @@ class YoutubeExtractor(Extractor):
 
 class TwitchExtractor(Extractor):
 
-    def extract(self):
+    def extract(self, options=None):
         pass
 
     def validate(self):
@@ -679,7 +707,7 @@ class FM2Extractor(Extractor):
         'romFilename', 'guid', 'romChecksum'
     )
 
-    def extract(self):
+    def extract(self, options=None):
         extracted_info = {}
 
         # Open file to extract header information
@@ -718,7 +746,7 @@ class FM2Extractor(Extractor):
 class GenericVideoExtractor(Extractor):
     supports_performances = True
 
-    def extract(self):
+    def extract(self, options=None):
         #   Need to import hachoir libraries in local scope because they overwrite sys.stdout / sys.stderr
         #   when imported, there is a configuration somewhere but I couldn't find it
         from hachoir_core.error import HachoirError
@@ -807,7 +835,7 @@ class SMCExtractor(Extractor):
                'Version', 'Checksum', 'Inverse checksum', r'Checksum (CRC32)',
                'DAT info')
 
-    def extract(self):
+    def extract(self, options=None):
         full_path = pipes.quote(os.path.abspath(self.source))
 
         #   Prep Ucon64 and parse Ucon64 output
@@ -852,7 +880,7 @@ class NESExtractor(Extractor):
                'Cartridge RAM', 'Save RAM', '512-byte trainer', 'VS-System',
                'Date', 'Checksum (CRC32)', 'DAT info')
 
-    def extract(self):
+    def extract(self, options=None):
         full_path = pipes.quote(os.path.abspath(self.source))
 
         #   Prep Ucon64 and parse Ucon64 output
@@ -862,7 +890,10 @@ class NESExtractor(Extractor):
         #   Copy file information to appropriate extracted fields
         parse_data['data_image_checksum'] = parse_data['Checksum (CRC32)']
         parse_data['data_image_checksum_type'] = 'crc32'
-        parse_data['date_published'] = datetime.strptime(parse_data['Date'], "%m/%Y").isoformat()
+        if 'Date' in parse_data:
+            parse_data['date_published'] = datetime.strptime(parse_data['Date'], "%m/%Y").isoformat()
+        else:
+            parse_data['date_published'] = None
 
         #   Save rom data to game_data store
         parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
@@ -888,3 +919,61 @@ class NESExtractor(Extractor):
     #   Again, if file extension works, then we're good for now
     def validate(self):
         return True
+
+
+#   Directory Extractor
+#   Used for games that are contained in a directory structure
+
+class DirectoryExtractor(Extractor):
+
+    def extract(self, options=None):
+        dir_path = os.path.abspath(os.path.expanduser(self.source))
+        files = []
+        main_exe_set = False
+
+        for d, subdirs, file_list in os.walk(dir_path):
+            #   If at top of tree, relative directory is blank
+            dir_relative_path = "" if dir_path == d else d.replace(dir_path + "/", "")
+
+            # check if hidden directory and skip
+            if re.match("\.[a-zA-Z]+", dir_relative_path):
+                continue
+
+            main_executable = options.get('main_executable')
+            for f in file_list:
+                file_dict = OrderedDict.fromkeys(dbm.headers[dbm.GAME_FILE_PATH_TABLE])
+                #   check for hidden files and skip
+                if f[0] == ".":
+                    continue
+
+                if main_executable and not main_exe_set and f == main_executable:
+                    file_dict['is_executable'] = True
+                    file_dict['main_executable'] = True
+                    main_exe_set = True
+                else:
+                    if f.split('.')[-1] in ('EXE', 'exe'):
+                        file_dict['is_executable'] = True
+                        if not main_executable and not main_exe_set:    # set first executable you find as 'main' if not specified
+                            file_dict['main_executable'] = True
+                            main_exe_set = True
+
+                #   File path is relative to source directory, so strip absolute path
+                file_dict['file_path'] = os.path.join(dir_relative_path, f)
+                #   Source data path is absolute, so leave it
+                file_dict['source_data'] = save_file_to_store(os.path.join(d, f), LOCAL_GAME_DATA_STORE)
+                files.append(file_dict)
+
+        self.extracted_info = {"file_info": files}
+            
+
+    def create_citation(self):
+
+        for fd in self.extracted_info['file_info']:
+            pass
+
+
+    def validate(self):
+        return os.path.isdir(self.source)
+
+#   Executable Extractor
+#   Mainly for MS-DOS executables at this point

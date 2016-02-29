@@ -94,6 +94,7 @@ PERFORMANCE_SCHEMA = {
     }}
 }
 
+
 # Citation reference wrapper class
 class CiteRef(object):
 

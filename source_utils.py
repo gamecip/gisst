@@ -50,6 +50,10 @@ def get_extractor_for_file(filepath):
             return extractor_class(filepath)
 
 
+def get_extractor_for_directory(directory):
+    return extractors.DirectoryExtractor(directory)
+
+
 def get_file_source_name(filename):
     for ext, name, _ in source_exts:
         if re.search(ext, filename):

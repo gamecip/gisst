@@ -22,6 +22,7 @@ from extractors import ExtractorError
 from source_utils import (
     get_extractor_for_uri,
     get_extractor_for_file,
+    get_extractor_for_directory,
     get_uri_source_name,
     get_url_source,
     get_file_source_name,
@@ -211,13 +212,15 @@ def extract_file(ctx, path_to_file, partial_citation):
 @cli.command(help='Create a game citation.')
 @click.option('--export', help='Return citation JSON string.', is_flag=True)
 @click.option('--file_path', help='Create citation from local file.')
+@click.option('--directory', help='Create citation from local directory.')
+@click.option('--executable', help='Specify executable for --directory flag')
 @click.option('--url', help='Create citation from url.')
 @click.option('--title', help='Create citation from game title.')
 @click.option('--partial', help='Create citation from partial JSON record.')
 @click.option('--schema_version', help='Specify schema version (default={}).'.format(GAME_SCHEMA_VERSION),
               default=GAME_SCHEMA_VERSION)
 @click.pass_context
-def cite_game(ctx, file_path, url, title, partial, export, schema_version):
+def cite_game(ctx, file_path, directory, executable, url, title, partial, export, schema_version):
     verbose = ctx.obj['VERBOSE']
     no_prompts = ctx.obj['NO_PROMPTS']
     alternate_citation = None
@@ -229,7 +232,7 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
         sys.exit(1)
 
     # if no input flag
-    if not file_path and not url and not title and not partial:
+    if not file_path and not url and not title and not partial and not directory:
         # Make a brand new citation
         if no_prompts:
             cond_print(verbose, 'Cannot create a blank citation with no-prompts flag active.')
@@ -240,7 +243,7 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
         # Check for similar citations
         alternate_citation = choose_game_citation(search_locally_with_citation(citation))
 
-    # If file path is specified, get the correct extractor
+    #   FILE PATH citation
     if file_path:
         extractor = get_extractor_for_file(os.path.expanduser(file_path))
         extractor.extract()
@@ -248,6 +251,49 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
             alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+
+    #   DIRECTORY citation
+    elif directory:
+        extractor = get_extractor_for_directory(os.path.abspath(os.path.expanduser(directory)))
+        alternate_citation = None   #   Needed to make sure name is present for check below
+
+        #   Make sure this is a directory
+        if not extractor.validate():
+            click.echo('{} is not a valid directory.'.format(directory))
+            sys.exit(1)
+
+        #   Add in the executable path if provided
+        options = {}
+        if executable:
+            options['main_executable'] = executable
+
+        #   If there's additional information from a partial, load it
+        if partial:
+            partial_json = json.loads(partial)
+            citation = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **partial_json['description'])
+        else:
+            citation = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, title=directory.split('/')[-1])
+
+        #   Get input if prompts are allowed
+        if not no_prompts:
+            citation = get_citation_user_input(citation)
+            alternate_citation = choose_citation(search_locally_with_citation(citation))
+
+        #   Extract all the files and paths
+        extractor.extract(options=options)
+
+        #   Add file_paths to game data store if this is a new citation
+        file_info = extractor.extracted_info['file_info']
+        if not alternate_citation:
+            for fd in file_info:
+                fd['game_uuid'] = citation['uuid']
+                dbm.insert_into_table(dbm.GAME_FILE_PATH_TABLE, fd.values())
+        else:
+        #   Clean up extracted data if alternate citation found (only for prompts call)
+            for fd in file_info:
+                shutil.rmtree(os.path.join(LOCAL_GAME_DATA_STORE, fd['source_data'], fd['file_path'].split('/')[-1]))
+
+    #   URL citation
     elif url:
         try:
             source = get_url_source(url)
@@ -264,6 +310,8 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
             alternate_citation = choose_game_citation(search_locally_with_citation(citation))
+
+    #   TITLE citation
     elif title:
         if no_prompts:
             cond_print(verbose, 'Cannot do citation by title with no-prompts flag active.')
@@ -284,6 +332,8 @@ def cite_game(ctx, file_path, url, title, partial, export, schema_version):
                                          title=title)
             # Edit the citation if needed
             citation = get_citation_user_input(citation)
+
+    #   PARTIAL citation
     elif partial:
         partial_json = json.loads(partial)
         # Create citation based on partial description
@@ -590,11 +640,11 @@ def search_locally_with_partial(partial, exclude_ref_types=None):
 
 
 def search_locally_with_game_partial(game_partial):
-    return search_locally_with_partial(game_partial, exclude_ref_types=(PERF_CITE_REF, 'extracted'))
+    return search_locally_with_partial(game_partial, exclude_ref_types=(PERF_CITE_REF, 'extracted', 'state', 'battery'))
 
 
 def search_locally_with_performance_partial(perf_partial):
-    return search_locally_with_partial(perf_partial, exclude_ref_types=(GAME_CITE_REF, 'extracted'))
+    return search_locally_with_partial(perf_partial, exclude_ref_types=(GAME_CITE_REF, 'extracted', 'state', 'battery'))
 
 
 def search_locally_with_game_title(title):

@@ -12,3 +12,6 @@ data/
 *.DS_Store
 *.fm2
 *.mov
+the-oregon-trail/
+*.smc
+*.nes

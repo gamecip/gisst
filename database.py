@@ -5,8 +5,10 @@ import os
 import json
 import pytz
 import click
+import uuid
 from datetime import datetime
 from functools import partial
+from itertools import chain
 from schema import (
     GAME_CITE_REF,
     PERF_CITE_REF,
@@ -41,6 +43,8 @@ class DatabaseManager:
 
     EXTRACTED_TABLE = 'extracted_info'
     GAME_CITATION_TABLE = 'game_citation'
+    GAME_FILE_PATH_TABLE = 'game_file_path'
+    GAME_SAVE_TABLE = 'game_save_table'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     FTS_INDEX_TABLE = 'fts_index_table'
     FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
@@ -78,7 +82,7 @@ class DatabaseManager:
             ('date_published',      'datetime',             field_constraint),
             ('localization_region', 'text',                 field_constraint),
             ('version',             'text',                 field_constraint),
-            ('data_image_checksum_type', 'text',                 field_constraint),
+            ('data_image_checksum_type', 'text',            field_constraint),
             ('data_image_checksum', 'text',                 field_constraint),
             ('data_image_source',   'text',                 field_constraint),
             ('notes',               'text',                 field_constraint),
@@ -87,6 +91,29 @@ class DatabaseManager:
             ('schema_version',      'text',                 field_constraint),
             ('created',             'datetime',             field_constraint),
             ('cite_object',         'text',                 field_constraint)
+        ],
+        GAME_FILE_PATH_TABLE: [
+            ('id',                  'integer primary key',  field_constraint),
+            ('game_uuid',           'text',                 field_constraint),
+            ('save_state_uuid',     'integer',              field_constraint),
+            ('is_executable',       'boolean',              field_constraint),
+            ('main_executable',     'boolean',              field_constraint),
+            ('file_path',           'text',                 field_constraint),
+            ('source_data',         'text',                 field_constraint)
+        ],
+        GAME_SAVE_TABLE: [
+            ('id',                                  'integer primary key',  field_constraint),
+            ('uuid',                                'text',                 field_constraint),
+            ('description',                         'text',                 field_constraint),
+            ('game_uuid',                           'text',                 field_constraint),
+            ('performance_uuid',                    'text',                 field_constraint),
+            ('performance_time_index',              'integer',              field_constraint),
+            ('save_state_source_data',              'text',                 field_constraint),
+            ('save_state_type',                     'text',                 field_constraint), #  Values are 'battery', or 'state', may make ENUM later
+            ('emulator_name',                       'text',                 field_constraint),
+            ('emulator_version',                    'text',                 field_constraint),
+            ('created_on',                          'datetime',             field_constraint), #    If this is imported, get creation date of file
+            ('created',                             'datetime',             field_constraint)  #    Timestamp for db entry
         ],
         PERFORMANCE_CITATION_TABLE: [
             ('id',                                  'integer primary key',  field_constraint),
@@ -126,7 +153,9 @@ class DatabaseManager:
         EXTRACTED_TABLE: ('id', 'title', 'source_uri', 'extracted_datetime', 'source_file_hash', 'metadata'),
         FTS_INDEX_TABLE: ('uuid', 'source_hash', 'source_type', 'content'),
         GAME_CITATION_TABLE: [x for x, _, _ in fields[GAME_CITATION_TABLE]],
-        PERFORMANCE_CITATION_TABLE: [x for x, _, _ in fields[PERFORMANCE_CITATION_TABLE]]
+        PERFORMANCE_CITATION_TABLE: [x for x, _, _ in fields[PERFORMANCE_CITATION_TABLE]],
+        GAME_FILE_PATH_TABLE: [x for x, _, _ in fields[GAME_FILE_PATH_TABLE]],
+        GAME_SAVE_TABLE: [x for x, _, _ in fields[GAME_SAVE_TABLE]]
     }
 
 
@@ -170,7 +199,11 @@ class DatabaseManager:
 
     @classmethod
     def create_tables(cls):
-        for table in (cls.EXTRACTED_TABLE, cls.GAME_CITATION_TABLE, cls.PERFORMANCE_CITATION_TABLE):
+        for table in (cls.EXTRACTED_TABLE,
+                      cls.GAME_CITATION_TABLE,
+                      cls.PERFORMANCE_CITATION_TABLE,
+                      cls.GAME_SAVE_TABLE,
+                      cls.GAME_FILE_PATH_TABLE):
             if not cls.check_for_table(table):
                 click.echo("Table '{}' not found, creating...".format(table))
                 cls.create_table(table, cls.fields[table])
@@ -190,6 +223,15 @@ class DatabaseManager:
     def insert_into_table(cls, table_name, values):
         query = 'insert into {} values ({})'.format(table_name, ",".join(['?' for _ in values]))
         return cls.run_query(query, values)
+
+    @classmethod
+    def update_table(cls, table_name, fields, values, key, where_fields, where_values, where_relation):
+        where_clause = cls.get_where_clause(where_fields, where_relation)
+        set_clause = ", ".join(['{} = ?'.format(f) for f in fields])
+        result = cls.run_query(r'update {} set {} where {}'.format(table_name, set_clause, where_clause),
+                               chain(values, where_values))
+        return result
+
 
     @classmethod
     def run_query(cls, query, parameters=(), commit=True, many=False):
@@ -283,6 +325,75 @@ class DatabaseManager:
         return False
 
     @classmethod
+    def add_to_save_state_table(cls, fts=False, **fields):
+        table = cls.GAME_SAVE_TABLE
+        values = []
+        values.insert(0, None)
+        values.append(fields.get('uuid', str(uuid.uuid4())))
+        values.append(fields.get('description'))
+        values.append(fields.get('game_uuid'))
+        values.append(fields.get('performance_uuid'))
+        values.append(fields.get('performance_time_index'))
+        values.append(fields.get('save_state_source_data'))
+        values.append(fields.get('save_state_type'))
+        values.append(fields.get('emulator_name'))
+        values.append(fields.get('emulator_version'))
+        values.append(fields.get('created_on'))
+        values.append(fields.get('created'))
+        result = cls.insert_into_table(table, values)
+        if fts and result:
+            cls.insert_into_table(cls.FTS_INDEX_TABLE, (fields.get('uuid'),
+                                                        fields.get('save_state_source_data'),
+                                                        fields.get('save_state_type'),
+                                                        " ".join(x for x in fields.values() if isinstance(x, str) or isinstance(x, unicode))))
+
+
+    @classmethod
+    def add_to_file_path_table(cls, **fields):
+        table = cls.GAME_FILE_PATH_TABLE
+        values = []
+        values.insert(0, None)
+        values.append(fields.get('game_uuid'))
+        values.append(fields.get('save_state_uuid'))
+        values.append(fields.get('is_executable'))
+        values.append(fields.get('main_executable'))
+        values.append(fields.get('file_path'))
+        values.append(fields.get('source_data'))
+        result = cls.insert_into_table(table, values)
+
+    #   Copy existing file information to new record for save_state
+    @classmethod
+    def link_existing_file_to_save_state(cls, new_save_state_uuid, file_id):
+        file = cls.retrieve_file_path(id=file_id)
+        if file:
+            source_file = file[0]
+            new_values = [None,] # 'id' primary key must be blank
+            for key in ('game_uuid', 'save_state_uuid', 'is_executable', 'main_executable', 'file_path', 'source_data'):
+                new_values.append(new_save_state_uuid) if key is 'save_state_uuid' else new_values.append(source_file[key])
+        else:
+            return []
+
+        return cls.insert_into_table(cls.GAME_FILE_PATH_TABLE, new_values)
+
+    #   Check if we already have the file in the database
+    @classmethod
+    def check_for_existing_file(cls, file_path, source_data):
+        results = cls.retrieve_file_path(file_path=file_path, source_data=source_data)
+        if results:
+            return results[0]['id']
+        else:
+            return None
+
+    #   Returns list of tuples [(source_path, target_path), ...]
+    @classmethod
+    def retrieve_paths_for_save_state(cls, save_state_uuid):
+        paths = cls.retrieve_file_path(save_state_uuid=save_state_uuid)
+        return [("/game_data/{}/{}".format(sd, fn), fp) for sd, fp, fn in map(lambda p: (p['source_data'],
+                                                                                p['file_path'],
+                                                                                p['file_path'].split('/')[-1]),
+                                                                              paths)]
+
+    @classmethod
     def check_for_duplicate_citation(cls, cite_ref, table):
         # UUID for incoming cite_ref check will most likely always be unique
         where_clause_keys = cls.get_where_clause(cite_ref.get_element_names(exclude=['uuid']), cls.AND)
@@ -335,6 +446,18 @@ class DatabaseManager:
     def retrieve_derived_performances(cls, game_uuid):
         perfs = cls.retrieve_attr_from_db('game_uuid', game_uuid, cls.PERFORMANCE_CITATION_TABLE)
         return [cls.create_cite_ref_from_db(PERF_CITE_REF, p_tuple) for p_tuple in perfs if p_tuple != (0,)]
+
+    #   For now returns list of dicts with relevant state information
+    @classmethod
+    def retrieve_save_state(cls, **fields):
+        states =  cls.retrieve_multiple_attr_from_db(fields.keys(), fields.values(), cls.GAME_SAVE_TABLE, cls.AND)
+        return [dict(zip(cls.headers[cls.GAME_SAVE_TABLE], state_tuple)) for state_tuple in states]
+
+    #   For now returns list of dicts with relevant path information
+    @classmethod
+    def retrieve_file_path(cls, **fields):
+        paths = cls.retrieve_multiple_attr_from_db(fields.keys(), fields.values(), cls.GAME_FILE_PATH_TABLE, cls.AND)
+        return [dict(zip(cls.headers[cls.GAME_FILE_PATH_TABLE], path_tuple)) for path_tuple in paths]
 
     @classmethod
     def create_cite_ref_from_db(cls, ref_type, db_tuple):
