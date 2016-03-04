@@ -933,7 +933,7 @@ class DirectoryExtractor(Extractor):
 
         for d, subdirs, file_list in os.walk(dir_path):
             #   If at top of tree, relative directory is blank
-            dir_relative_path = "" if dir_path == d else d.replace(dir_path + "/", "")
+            dir_relative_path = "" if dir_path == d else d.replace(dir_path, "")
 
             # check if hidden directory and skip
             if re.match("\.[a-zA-Z]+", dir_relative_path):

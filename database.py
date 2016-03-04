@@ -6,8 +6,11 @@ import json
 import pytz
 import click
 import uuid
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker, scoped_session
 from datetime import datetime
 from functools import partial
+from collections import OrderedDict
 from itertools import chain
 from schema import (
     GAME_CITE_REF,
@@ -22,7 +25,20 @@ DB_TEST_FILE_NAME = 'test_cite.db'
 LOCAL_CITATION_DATA_STORE = '{}/cite_data'.format(LOCAL_DATA_ROOT)
 LOCAL_GAME_DATA_STORE = '{}/game_data'.format(LOCAL_DATA_ROOT)
 
+#   This is needed for managing db connections in SQLite because Flask runs each
+#   session as a thread local
+engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
+
+#   We need to load the FTS extension for each connection
+#   This event listener does that for each connection, regardless of whether it requires it
+@event.listens_for(engine, "connect")
+def connect(dbapi_connection, connection_rec):
+    dbapi_connection.enable_load_extension(True)
+    dbapi_connection.load_extension(DatabaseManager.FTS_EXT_PATH)
+
 #   Database utility functions, might move somewhere else if there are too many
+#   FOR NOW THERE ARE NO FOREIGN KEYS, to allow for them will need to add a
+#   'PRAGMA foreign_keys = ON' call before each connection
 def foreign_key(foreign_table_name, key_name):
     def foreign_key_partial(field, constraints, ftn, key):
         DatabaseManager._constraints.append('foreign key({}) references {}({})'.format(field, ftn, key))
@@ -37,9 +53,8 @@ def no_constraint(field, constraint):
     return "{}".format(field)
 
 class DatabaseManager:
-    db = None
-    cur = None
-    current_db_file = None
+    db = scoped_session(sessionmaker(bind=engine))
+    current_db_file = DB_FILE_NAME
 
     EXTRACTED_TABLE = 'extracted_info'
     GAME_CITATION_TABLE = 'game_citation'
@@ -112,6 +127,9 @@ class DatabaseManager:
             ('save_state_type',                     'text',                 field_constraint), #  Values are 'battery', or 'state', may make ENUM later
             ('emulator_name',                       'text',                 field_constraint),
             ('emulator_version',                    'text',                 field_constraint),
+            ('emt_stack_pointer',                   'integer',                 field_constraint),
+            ('stack_pointer',                       'integer',                 field_constraint),
+            ('time',                                'integer',                 field_constraint),
             ('created_on',                          'datetime',             field_constraint), #    If this is imported, get creation date of file
             ('created',                             'datetime',             field_constraint)  #    Timestamp for db entry
         ],
@@ -159,25 +177,9 @@ class DatabaseManager:
     }
 
 
-    @classmethod
-    def connect_to_db(cls, test=False):
-        if test:
-            DatabaseManager.db = sqlite3.connect(DB_TEST_FILE_NAME)
-            DatabaseManager.current_db_file = DB_TEST_FILE_NAME
-        else:
-            DatabaseManager.db = sqlite3.connect(DB_FILE_NAME)
-            DatabaseManager.current_db_file = DB_FILE_NAME
-        DatabaseManager.cur = DatabaseManager.db.cursor()
-        # SQLite requires setting foreign key constraint flag on EVERY connection
-        DatabaseManager.run_query('PRAGMA foreign_keys = ON')
-        # SQLite load the fts5 extension to allow for full text search queries
-        DatabaseManager.db.enable_load_extension(True)
-        DatabaseManager.db.load_extension("{}".format(DatabaseManager.FTS_EXT_PATH))
-
     #   TODO: change this to use absolute path to specific db directory
     @classmethod
     def delete_db(cls):
-        DatabaseManager.db.close()
         try:
             open(DatabaseManager.current_db_file)
         except IOError:
@@ -220,69 +222,80 @@ class DatabaseManager:
         return cls.run_query(query)
 
     @classmethod
-    def insert_into_table(cls, table_name, values):
-        query = 'insert into {} values ({})'.format(table_name, ",".join(['?' for _ in values]))
-        return cls.run_query(query, values)
+    def insert_into_table(cls, table_name, keys, values):
+        query = 'insert into {} values ({})'.format(table_name, ",".join([':{}'.format(k) for k in keys]))
+        return cls.run_query(query, dict(zip(keys,values)))
 
     @classmethod
-    def update_table(cls, table_name, fields, values, key, where_fields, where_values, where_relation):
-        where_clause = cls.get_where_clause(where_fields, where_relation)
-        set_clause = ", ".join(['{} = ?'.format(f) for f in fields])
+    def update_table(cls, table_name, fields, values, where_fields, where_values, where_relation=AND):
+        where_clause = cls.get_where_clause(where_fields, where_values, where_relation)
+        set_clause = ", ".join(['{} = :{}'.format(f, f) for f in fields])
         result = cls.run_query(r'update {} set {} where {}'.format(table_name, set_clause, where_clause),
-                               chain(values, where_values))
+                               dict(zip(chain(fields, where_fields),chain(values, where_values))))
         return result
 
 
     @classmethod
-    def run_query(cls, query, parameters=(), commit=True, many=False):
-        exec_func = cls.db.executemany if many else cls.db.execute
+    def run_query(cls, query, parameters=None, commit=True, many=False):
+        sess = cls.db()
         try:
-            result = exec_func(query, parameters)
+            result = sess.execute(query, parameters) if parameters else sess.execute(query)
         except sqlite3.Error as e:
+            sess.rollback()
             print e.message
             return None
         # .commit() method is needed for changes to be saved, can create false positives in tests
         # if left out since current connection will return its changes, but other connections will not see them
+        res = result.fetchall()
         if commit:
-            cls.db.commit()
-        return result
+            sess.commit()
+        cls.db.remove()
+        return res
+
+    @classmethod
+    def retrieve_all_from_table(cls, table_name, start_index=0, limit=None):
+        return bound_array(cls.run_query(r'select * from {}'.format(table_name), commit=False), start_index, limit)
 
     @classmethod
     def is_attr_in_db(cls, attr, value, table_name):
-        return cls.run_query(r'select exists(select * from {} where {}=?)'.format(table_name, attr), (value,),
-                             commit=False).fetchall() != [(0,)]
+        return cls.run_query(r'select exists(select * from {0} where {1}=:{1})'.format(table_name, attr), {attr: value},
+                             commit=False) != [(0,)]
 
     @classmethod
     def retrieve_attr_from_db(cls, attr, value, table_name, start_index=0, limit=None):
-        result = cls.run_query(r'select * from {} where {}=?'.format(table_name, attr),
-                               (value,),
-                               commit=False).fetchall()
+        result = cls.run_query(r'select * from {0} where {1}=:{1}'.format(table_name, attr, attr),
+                               {attr: value},
+                               commit=False)
         return bound_array(result, start_index, limit)
 
     @classmethod
     def retrieve_multiple_attr_from_db(cls, attrs, values, table_name, relation=OR, start_index=0, limit=None):
-        where_clause = cls.get_where_clause(attrs, relation)
+        where_clause = cls.get_where_clause(attrs, values, relation)
         result = cls.run_query(r'select * from {} where {}'.format(table_name, where_clause),
-                             values,
-                             commit=False).fetchall()
+                             dict(zip(attrs, values)),
+                             commit=False)
         return bound_array(result, start_index, limit)
 
     @classmethod
     def retrieve_from_fts(cls, search_strings, source_types=None, start_index=0, limit=None):
         phrases = " ".join(search_strings)
-        sources = cls.get_where_clause(['source_type' for _ in source_types], cls.OR) if source_types else None
-        query = 'select uuid, source_hash, source_type, content, rank from {0} where {0} match ?{1} order by rank'.format(cls.FTS_INDEX_TABLE, ' and {}'.format(sources) if source_types else '')
+        sources = cls.get_where_clause_k_v(['source_type' for _ in source_types], ['{}'.format(s) for s in source_types], source_types, cls.OR) if source_types else None
+        query = 'select uuid, source_hash, source_type, content, rank from {0} where {0} match :content{1} order by rank'.format(cls.FTS_INDEX_TABLE, ' and {}'.format(sources) if source_types else '')
 
-        params = (phrases,) if not source_types else [phrases] + source_types
+        if not source_types:
+            params = {'content': phrases}
+        else:
+            params = {k: k for k in source_types}
+            params['content'] = phrases
         result = cls.run_query(query, params, commit=False)
-        cites = result.fetchall() if result else []
+        cites = result if result else []
         return bound_array(cites, start_index, limit)
 
     @classmethod
     def check_for_table(cls, table_name):
-        return cls.run_query(r'select exists(select name from sqlite_master where type=? and name=?)',
-                             parameters=('table', table_name),
-                             commit=False).fetchall() != [(0,)]
+        return cls.run_query(r'select exists(select name from sqlite_master where type=:table and name=:name)',
+                             parameters={'table': 'table', 'name': table_name},
+                             commit=False) != [(0,)]
 
     @classmethod
     def add_to_extracted_table(cls, extracted_info, fts=False):
@@ -296,12 +309,12 @@ class DatabaseManager:
                      extracted_info.get('source_file_hash', None),
                      json.dumps(extracted_info))  # 'metadata' field is just a string dump of the JSON extracted_info object
 
-        result = cls.insert_into_table(cls.EXTRACTED_TABLE, db_values)
+        result = cls.insert_into_table(cls.EXTRACTED_TABLE, cls.headers[cls.EXTRACTED_TABLE], db_values)
         if fts and result:
-            cls.insert_into_table(cls.FTS_INDEX_TABLE, (None,   # UUID not used
-                                                        extracted_info.get('source_file_hash', None),
-                                                        'extracted',
-                                                        json.dumps(extracted_info)))
+            cls.insert_into_table(cls.FTS_INDEX_TABLE, cls.headers[cls.FTS_INDEX_TABLE], (None,
+                                                                                          extracted_info.get('source_file_hash', None),
+                                                                                          'extracted',
+                                                                                          json.dumps(extracted_info)))
         return result
 
     # Currently adds to citation table if it appears to be a new entry
@@ -315,9 +328,9 @@ class DatabaseManager:
             values.insert(0, None)                      # Primary Key
             values.append(datetime.now(tz=pytz.utc))    # Created timestamp
             values.append(cite_ref.to_json_string())    # Cite object
-            result = cls.insert_into_table(table, values)
+            result = cls.insert_into_table(table, cls.headers[table], values)
             if fts and result:
-                cls.insert_into_table(cls.FTS_INDEX_TABLE, (cite_ref['uuid'],
+                cls.insert_into_table(cls.FTS_INDEX_TABLE, cls.headers[cls.FTS_INDEX_TABLE], (cite_ref['uuid'],
                                                             None,   # Source file hash not used
                                                             cite_ref.ref_type,
                                                             cite_ref.to_json_string()))
@@ -327,9 +340,10 @@ class DatabaseManager:
     @classmethod
     def add_to_save_state_table(cls, fts=False, **fields):
         table = cls.GAME_SAVE_TABLE
+        uid = str(uuid.uuid4())
         values = []
         values.insert(0, None)
-        values.append(fields.get('uuid', str(uuid.uuid4())))
+        values.append(fields.get('uuid', uid))
         values.append(fields.get('description'))
         values.append(fields.get('game_uuid'))
         values.append(fields.get('performance_uuid'))
@@ -338,14 +352,18 @@ class DatabaseManager:
         values.append(fields.get('save_state_type'))
         values.append(fields.get('emulator_name'))
         values.append(fields.get('emulator_version'))
+        values.append(fields.get('emt_stack_pointer'))
+        values.append(fields.get('stack_pointer'))
+        values.append(fields.get('system_time'))
         values.append(fields.get('created_on'))
         values.append(fields.get('created'))
-        result = cls.insert_into_table(table, values)
+        result = cls.insert_into_table(table, cls.headers[table], values)
         if fts and result:
-            cls.insert_into_table(cls.FTS_INDEX_TABLE, (fields.get('uuid'),
+            cls.insert_into_table(cls.FTS_INDEX_TABLE, cls.headers[cls.FTS_INDEX_TABLE], (fields.get('uuid'),
                                                         fields.get('save_state_source_data'),
                                                         fields.get('save_state_type'),
                                                         " ".join(x for x in fields.values() if isinstance(x, str) or isinstance(x, unicode))))
+        return uid
 
 
     @classmethod
@@ -359,7 +377,7 @@ class DatabaseManager:
         values.append(fields.get('main_executable'))
         values.append(fields.get('file_path'))
         values.append(fields.get('source_data'))
-        result = cls.insert_into_table(table, values)
+        result = cls.insert_into_table(table, cls.headers[table], values)
 
     #   Copy existing file information to new record for save_state
     @classmethod
@@ -367,18 +385,18 @@ class DatabaseManager:
         file = cls.retrieve_file_path(id=file_id)
         if file:
             source_file = file[0]
-            new_values = [None,] # 'id' primary key must be blank
-            for key in ('game_uuid', 'save_state_uuid', 'is_executable', 'main_executable', 'file_path', 'source_data'):
-                new_values.append(new_save_state_uuid) if key is 'save_state_uuid' else new_values.append(source_file[key])
+            source_file['save_state_uuid'] = new_save_state_uuid
+            source_file['id'] = None
+            new_values = source_file.values()
         else:
             return []
 
-        return cls.insert_into_table(cls.GAME_FILE_PATH_TABLE, new_values)
+        return cls.insert_into_table(cls.GAME_FILE_PATH_TABLE, cls.headers[cls.GAME_FILE_PATH_TABLE], new_values)
 
     #   Check if we already have the file in the database
     @classmethod
     def check_for_existing_file(cls, file_path, source_data):
-        results = cls.retrieve_file_path(file_path=file_path, source_data=source_data)
+        results = cls.retrieve_file_path(file_path=file_path, source_data=source_data, save_state_uuid=None)
         if results:
             return results[0]['id']
         else:
@@ -396,14 +414,18 @@ class DatabaseManager:
     @classmethod
     def check_for_duplicate_citation(cls, cite_ref, table):
         # UUID for incoming cite_ref check will most likely always be unique
-        where_clause_keys = cls.get_where_clause(cite_ref.get_element_names(exclude=['uuid']), cls.AND)
+        where_clause_keys = cls.get_where_clause(cite_ref.get_element_names(exclude=['uuid']), cite_ref.get_element_values(exclude=['uuid']), cls.AND)
         query = r'select exists(select * from {} where {})'.format(table, where_clause_keys)
-        result = cls.run_query(query, cite_ref.get_element_values(exclude=['uuid']), commit=False)
-        return result.fetchall() != [(0,)]
+        result = cls.run_query(query, dict(cite_ref.get_element_items(exclude=['uuid'])), commit=False)
+        return result != [(0,)]
 
     @staticmethod
-    def get_where_clause(keys, relation):
-        return relation.join(["{}=?".format(key) for key in keys])
+    def get_where_clause(keys, values, relation):
+        return relation.join(map(lambda kv: "{}=:{}".format(kv[0], kv[0]) if kv[1] else "{} is null".format(kv[0]), zip(keys, values)))
+
+    @staticmethod
+    def get_where_clause_k_v(keys, var_names, values, relation):
+        return relation.join(map(lambda kv: "{}:={}".format(kv[0],kv[1]) if kv[2] else "{} is null".format(kv[0]), zip(keys, var_names, values)))
 
     @classmethod
     def retrieve_performance_chain(cls, performance_uuid):
@@ -451,13 +473,13 @@ class DatabaseManager:
     @classmethod
     def retrieve_save_state(cls, **fields):
         states =  cls.retrieve_multiple_attr_from_db(fields.keys(), fields.values(), cls.GAME_SAVE_TABLE, cls.AND)
-        return [dict(zip(cls.headers[cls.GAME_SAVE_TABLE], state_tuple)) for state_tuple in states]
+        return [OrderedDict(zip(cls.headers[cls.GAME_SAVE_TABLE], state_tuple)) for state_tuple in states]
 
     #   For now returns list of dicts with relevant path information
     @classmethod
     def retrieve_file_path(cls, **fields):
         paths = cls.retrieve_multiple_attr_from_db(fields.keys(), fields.values(), cls.GAME_FILE_PATH_TABLE, cls.AND)
-        return [dict(zip(cls.headers[cls.GAME_FILE_PATH_TABLE], path_tuple)) for path_tuple in paths]
+        return [OrderedDict(zip(cls.headers[cls.GAME_FILE_PATH_TABLE], path_tuple)) for path_tuple in paths]
 
     @classmethod
     def create_cite_ref_from_db(cls, ref_type, db_tuple):

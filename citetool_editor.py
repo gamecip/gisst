@@ -53,7 +53,6 @@ def cli(ctx, verbose, no_prompts):
     ctx.obj['NO_PROMPTS'] = no_prompts
     check_for_data_root()
     check_for_fts_lib() #   Hack right now, will change
-    dbm.connect_to_db() # Connect to or create dbs
     check_for_db_and_data()
 
 
@@ -287,7 +286,7 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
         if not alternate_citation:
             for fd in file_info:
                 fd['game_uuid'] = citation['uuid']
-                dbm.insert_into_table(dbm.GAME_FILE_PATH_TABLE, fd.values())
+                dbm.insert_into_table(dbm.GAME_FILE_PATH_TABLE, fd.keys(), fd.values())
         else:
         #   Clean up extracted data if alternate citation found (only for prompts call)
             for fd in file_info:

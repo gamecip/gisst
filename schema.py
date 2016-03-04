@@ -127,6 +127,11 @@ class CiteRef(object):
             return tuple([v for e, v in self.elements.items() if e not in exclude])
         return tuple([v for v in self.elements.values()])
 
+    def get_element_items(self, exclude=None):
+        if exclude:
+            return zip(self.get_element_names(exclude), self.get_element_values(exclude))
+        return self.elements.items()
+
     def to_json_string(self):
         #   Convert datetimes to strings for json encoding
         json_dict = dict(map(lambda x: (x[0], x[1].isoformat()) if isinstance(x[1], datetime.datetime) else (x[0], x[1]),

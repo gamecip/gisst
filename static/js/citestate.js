@@ -76,8 +76,8 @@
             extraFiles:otherFiles,
             preRun: [],
             postRun: [],
-            print: console.log,
-            printErr: console.error,
+            print: function(m) { console.log(m); },
+            printErr: function(e) { console.error(e); },
             canvas: canvas
         };
         instance = emuModule(moduleObject);

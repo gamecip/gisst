@@ -8,55 +8,24 @@
     <script src="/static/js/citestate.js"></script>
     <script src="/static/js/stringview.js"></script>
     <script src="/static/js/keydrown.js"></script>
+    <script src="/static/js/sha1.js"></script>
     <script src="/static/js/play.js"></script>
 </head>
 <body data-game-uuid="{{ cite_ref['uuid'] }}" data-init-state="{{ init_state['uuid'] }}">
 <div id="emulator"></div>
 <div id="emulatorControls">
-    <button id="saveState">Save State</button>
-    <button id="loadLastState">Load Most Recent State</button>
-    <button id="reset">Reset Emulation</button>
-    <button id="toggleAudio">Audio Off</button>
+    <button id="startEmulationButton">Start</button>
+    <button id="saveStateButton">Save State</button>
+    <button id="loadLastStateButton">Load Most Recent State</button>
+    <button id="resetButton">Reset Emulation</button>
+    <button id="toggleAudioButton">Audio Off</button>
 </div>
-Current State Description: <input id="stateDescription" type="text"/>
-<div id="mostRecentState">
-   <h3>Most Recent Save State</h3>
-    <table id="mostRecentStateTable">
-        <tbody>
-        <tr>
-            {% for header in state_headers %}
-                {% if init_state %}
-                    <td>{{ init_state[header] }}</td>
-                {% elif state_dicts %}
-                    <td>{{ state_dicts[-1][header]}}</td>
-                {% endif %}
-            {% endfor %}
-        </tr>
-        </tbody>
-    </table>
+<div id="stateDescriptionContainer">
+    Current State Description: <input id="stateDescriptionTextBox" type="text"/>
 </div>
-<div id="previousStates">
-    <h3>Previous Save States</h3>
-    <table id="saveStateTable">
-        <thead>
-            <tr>
-                <th>load state</th>
-                {% for header in state_headers %}
-                <th>{{header}}</th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for state in state_dicts %}
-            <tr>
-                <td><span class="loadableState" data-path="{{ state['load_path']}}">load</span></td>
-                {% for header in state_headers %}
-                <td>{{ state[header] }}</td>
-                {% endfor %}
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+<div id="performanceContainer"></div>
+<div id="mostRecentStateContainer"></div>
+<div id="saveStateListingContainer"></div>
+<div id="fileListingContainer"></div>
 </body>
 </html>
