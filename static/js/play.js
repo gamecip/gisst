@@ -265,49 +265,49 @@ $(function() {
         $.post(addStateRecordURL(PlayContext.game.uuid),
             dataObject,
             function(stateRecordData){
+                // Add State File Data to State Record
                 var xhr = new XMLHttpRequest();
                 xhr.open("PUT", addStateDataURL(stateRecordData['uuid']), true);
                 xhr.onload = function(e){
-                    $.getJSON(jsonStateInfoURL(stateRecordData['uuid'], "", updateState))
+                    //After that add all files to the State Record
+                    PlayContext.emu.saveExtraFiles(PlayContext.emu.listExtraFiles(), function(fileMapping){
+                        var fileCount = Object.keys(fileMapping).length;
+                        PlayContext.currentStates.push(stateRecordData);
+                        stateUpdate.extraFiles = fileMapping;
+
+                        function filePathPost(filePath, fileObject){
+                            return function(){
+                                $.post(addExtraFileRecordURL(stateRecordData['uuid']),
+                                    fileObject,
+                                    function(data){
+                                        stateUpdate.extraFileInfo[filePath] = data;
+                                        fileCount--;
+                                        if(fileCount === 0){
+                                            $.getJSON(jsonStateInfoURL(stateRecordData['uuid']), "", updateState)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        for(var file in fileMapping){
+                            var cleanFilePath;
+                            if(file.match(/^\//)){ //if there is a leading slash remove it
+                                cleanFilePath = file.slice(1)
+                            }
+                            var fileObj = {
+                                extra_file_data: StringView.bytesToBase64(fileMapping[file]),
+                                sha1_hash: SHA1Generator.calcSHA1FromByte(fileMapping[file]),
+                                data_length: fileMapping[file].length,
+                                rel_file_path: cleanFilePath,
+                                is_executable: PlayContext.currentFileInformation[cleanFilePath].isExecutable,
+                                main_executable: PlayContext.currentFileInformation[cleanFilePath].mainExecutable
+                            };
+                            filePathPost(cleanFilePath, fileObj)();
+                        }
+                    });
                 };
                 xhr.send(stateData.heap);
-                //After that add files or update them
-                PlayContext.emu.saveExtraFiles(PlayContext.emu.listExtraFiles(), function(fileMapping){
-                    var fileCount = Object.keys(fileMapping).length;
-                    PlayContext.currentStates.push(stateRecordData);
-                    stateUpdate.extraFiles = fileMapping;
-
-                    function filePathPost(filePath, fileObject){
-                        return function(){
-                            $.post(addExtraFileRecordURL(stateRecordData['uuid']),
-                                fileObject,
-                                function(data){
-                                    stateUpdate.extraFileInfo[filePath] = data;
-                                    fileCount--;
-                                    if(fileCount === 0){
-                                        $.getJSON(jsonStateInfoURL(stateRecordData['uuid'], "", updateState))
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    for(var file in fileMapping){
-                        var cleanFilePath;
-                        if(file.match(/^\//)){ //if there is a leading slash remove it
-                            cleanFilePath = file.slice(1)
-                        }
-                        var fileObj = {
-                            extra_file_data: StringView.bytesToBase64(fileMapping[file]),
-                            sha1_hash: SHA1Generator.calcSHA1FromByte(fileMapping[file]),
-                            data_length: fileMapping[file].length,
-                            rel_file_path: cleanFilePath,
-                            is_executable: PlayContext.currentFileInformation[cleanFilePath].isExecutable,
-                            main_executable: PlayContext.currentFileInformation[cleanFilePath].mainExecutable
-                        };
-                        filePathPost(cleanFilePath, fileObj)();
-                    }
-                });
             },
             'json'
         );
