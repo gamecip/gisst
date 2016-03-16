@@ -61,6 +61,8 @@ class DatabaseManager:
     GAME_FILE_PATH_TABLE = 'game_file_path'
     GAME_SAVE_TABLE = 'game_save_table'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
+    SAVE_STATE_PERFORMANCE_LINK_TABLE = 'save_state_performance_link_table'
+    FILE_PATH_SAVE_STATE_LINK_TABLE = 'file_path_save_state_link_table'
     FTS_INDEX_TABLE = 'fts_index_table'
     FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
 
@@ -110,7 +112,7 @@ class DatabaseManager:
         GAME_FILE_PATH_TABLE: [
             ('id',                  'integer primary key',  field_constraint),
             ('game_uuid',           'text',                 field_constraint),
-            ('save_state_uuid',     'integer',              field_constraint),
+            ('save_state_uuid',     'text',                 field_constraint),
             ('is_executable',       'boolean',              field_constraint),
             ('main_executable',     'boolean',              field_constraint),
             ('file_path',           'text',                 field_constraint),
@@ -124,12 +126,13 @@ class DatabaseManager:
             ('performance_uuid',                    'text',                 field_constraint),
             ('performance_time_index',              'integer',              field_constraint),
             ('save_state_source_data',              'text',                 field_constraint),
+            ('compressed',                          'boolean',              field_constraint),
             ('save_state_type',                     'text',                 field_constraint), #  Values are 'battery', or 'state', may make ENUM later
             ('emulator_name',                       'text',                 field_constraint),
             ('emulator_version',                    'text',                 field_constraint),
-            ('emt_stack_pointer',                   'integer',                 field_constraint),
-            ('stack_pointer',                       'integer',                 field_constraint),
-            ('time',                                'integer',                 field_constraint),
+            ('emt_stack_pointer',                   'integer',              field_constraint),
+            ('stack_pointer',                       'integer',              field_constraint),
+            ('time',                                'integer',              field_constraint),
             ('created_on',                          'datetime',             field_constraint), #    If this is imported, get creation date of file
             ('created',                             'datetime',             field_constraint)  #    Timestamp for db entry
         ],
@@ -164,6 +167,11 @@ class DatabaseManager:
             ('schema_version',                      'text',                 field_constraint),
             ('created',                             'datetime',             field_constraint),
             ('cite_object',                         'text',                 field_constraint)
+        ],
+        SAVE_STATE_PERFORMANCE_LINK_TABLE: [
+            ('performance_uuid', 'text', field_constraint),
+            ('save_state_uuid', 'text', field_constraint),
+            ('time_index', 'integer', field_constraint)
         ]
     }
 
@@ -173,7 +181,8 @@ class DatabaseManager:
         GAME_CITATION_TABLE: [x for x, _, _ in fields[GAME_CITATION_TABLE]],
         PERFORMANCE_CITATION_TABLE: [x for x, _, _ in fields[PERFORMANCE_CITATION_TABLE]],
         GAME_FILE_PATH_TABLE: [x for x, _, _ in fields[GAME_FILE_PATH_TABLE]],
-        GAME_SAVE_TABLE: [x for x, _, _ in fields[GAME_SAVE_TABLE]]
+        GAME_SAVE_TABLE: [x for x, _, _ in fields[GAME_SAVE_TABLE]],
+        SAVE_STATE_PERFORMANCE_LINK_TABLE: [x for x, _, _ in fields[SAVE_STATE_PERFORMANCE_LINK_TABLE]]
     }
 
 
@@ -237,19 +246,17 @@ class DatabaseManager:
 
     @classmethod
     def run_query(cls, query, parameters=None, commit=True, many=False):
-        sess = cls.db()
         try:
-            result = sess.execute(query, parameters) if parameters else sess.execute(query)
+            result = cls.db.execute(query, parameters) if parameters else cls.db.execute(query)
         except sqlite3.Error as e:
-            sess.rollback()
+            cls.db.rollback()
             print e.message
             return None
         # .commit() method is needed for changes to be saved, can create false positives in tests
         # if left out since current connection will return its changes, but other connections will not see them
         res = result.fetchall()
         if commit:
-            sess.commit()
-        cls.db.remove()
+            cls.db.commit()
         return res
 
     @classmethod
@@ -349,6 +356,7 @@ class DatabaseManager:
         values.append(fields.get('performance_uuid'))
         values.append(fields.get('performance_time_index'))
         values.append(fields.get('save_state_source_data'))
+        values.append(fields.get('compressed'))
         values.append(fields.get('save_state_type'))
         values.append(fields.get('emulator_name'))
         values.append(fields.get('emulator_version'))
@@ -441,10 +449,7 @@ class DatabaseManager:
                     prev_cite = cls.create_cite_ref_from_db(PERF_CITE_REF, prev)
                     performance_chain.insert(0, prev_cite)
                     prev_uuid = prev_cite['previous_performance_uuid']
-                    if prev_uuid:
-                        prev = cls.retrieve_attr_from_db('uuid', prev_uuid, cls.PERFORMANCE_CITATION_TABLE)[0]
-                    else:
-                        prev = None
+                    prev = cls.retrieve_attr_from_db('uuid', prev_uuid, cls.PERFORMANCE_CITATION_TABLE)[0] if prev_uuid else None
             return performance_chain
         return []
 

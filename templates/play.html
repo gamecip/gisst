@@ -9,23 +9,9 @@
     <script src="/static/js/stringview.js"></script>
     <script src="/static/js/keydrown.js"></script>
     <script src="/static/js/sha1.js"></script>
+    <script src="/static/js/lzma.js"></script>
+    <script src="/static/js/async.js"></script>
     <script src="/static/js/play.js"></script>
 </head>
-<body data-game-uuid="{{ cite_ref['uuid'] }}" data-init-state="{{ init_state['uuid'] }}">
-<div id="emulator"></div>
-<div id="emulatorControls">
-    <button id="startEmulationButton">Start</button>
-    <button id="saveStateButton">Save State</button>
-    <button id="loadLastStateButton">Load Most Recent State</button>
-    <button id="resetButton">Reset Emulation</button>
-    <button id="toggleAudioButton">Audio Off</button>
-</div>
-<div id="stateDescriptionContainer">
-    Current State Description: <input id="stateDescriptionTextBox" type="text"/>
-</div>
-<div id="performanceContainer"></div>
-<div id="mostRecentStateContainer"></div>
-<div id="saveStateListingContainer"></div>
-<div id="fileListingContainer"></div>
-</body>
+<body data-game-uuid="{{ cite_ref['uuid'] }}" data-state-uuid="{{ init_state['uuid'] }}"></body>
 </html>
