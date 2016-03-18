@@ -1,6 +1,8 @@
-/**
- * Created by erickaltman on 3/3/16.
+/*
+ * Created by erickaltman on 3/15/16.
  */
+
+//from http://stackoverflow.com/questions/16832586/get-sha1-checksum-of-byte-array-in-javascript
 var SHA1Generator = {
 
     hex_chr: "0123456789abcdef",
@@ -99,6 +101,7 @@ var SHA1Generator = {
         }
     }
 };
+<<<<<<< HEAD
 
 function base64ArrayBuffer(arrayBuffer) {
   var base64    = '';
@@ -151,3 +154,5 @@ function base64ArrayBuffer(arrayBuffer) {
 
   return base64
 }
+=======
+>>>>>>> compression_asyc

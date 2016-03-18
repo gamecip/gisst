@@ -32,7 +32,7 @@
         throw new Error("Unrecognized System");
     }
 
-    function realCite(targetID, onLoad, system, emulator, gameFile, freezeFile, otherFiles) {
+    function realCite(targetID, onLoad, system, emulator, emulatorRootURL, gameFile, freezeFile, otherFiles) {
         var emuModule = LoadedEmulators[emulator];
         if (!emuModule) {
             throw new Error("Emulator Not Loaded");
@@ -65,7 +65,7 @@
         var instance;
         var moduleObject = {
             locateFile: function(url) {
-                return "/static/js/emulators/"+url;
+                return emulatorRootURL + url;
             },
             targetID:targetID,
             keyboardListeningElement:targetElement,
@@ -89,21 +89,21 @@
     }
 
     //the loaded emulator instance will implement saveState(cb), saveExtraFiles(cb), and loadState(s,cb)
-    window.CiteState.cite = function (targetID, onLoad, gameFile, freezeFile, otherFiles) {
+    window.CiteState.cite = function (targetID, onLoad, emulatorRootURL, gameFile, freezeFile, otherFiles) {
         var system = determineSystem(gameFile);
         var emulator = EmulatorNames[system];
         if (!(emulator in LoadedEmulators)) {
-            var script = "/static/js/emulators/" + emulator + ".js";
+            var script = emulatorRootURL + emulator + ".js";
             //load the script on the page
             var scriptElement = document.createElement("script");
             scriptElement.src = script;
             scriptElement.onload = function () {
                 LoadedEmulators[emulator] = window[emulator];
-                realCite(targetID, onLoad, system, emulator, gameFile, freezeFile, otherFiles);
+                realCite(targetID, onLoad, system, emulator, emulatorRootURL, gameFile, freezeFile, otherFiles);
             };
             document.body.appendChild(scriptElement);
         } else {
-            realCite(targetID, onLoad, system, emulator, gameFile, freezeFile, otherFiles);
+            realCite(targetID, onLoad, system, emulator, emulatorRootURL, gameFile, freezeFile, otherFiles);
         }
     }
 })();

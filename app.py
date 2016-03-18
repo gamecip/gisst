@@ -110,26 +110,27 @@ def citation_page(uuid):
                                performance_video=performance_video)
     return "No record found, sorry."
 
+
 @app.route("/json/state_info/<uuid>")
 def emulation_info_state(uuid):
     state_info = {}
     state_ref = dbm.retrieve_save_state(uuid=uuid)[0]
     other_save_states = dbm.retrieve_save_state(game_uuid=state_ref['game_uuid'])
     state_extra_files = dbm.retrieve_file_path(save_state_uuid=uuid)
-    state_info['stateRecord'] = state_ref
-    state_info['saveStates'] = other_save_states
-    state_info['extraFiles'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
+    state_info['record'] = state_ref
+    state_info['availableStates'] = other_save_states
+    state_info['fileMapping'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
                                                                                       state_extra_files)} if state_extra_files else None
-    state_info['extraFileInfo'] = {f['file_path']: f for f in state_extra_files}
-    state_info['freezeFile'] = os.path.join('/cite_data',
+    state_info['fileInformation'] = {f['file_path']: f for f in state_extra_files}
+    state_info['stateFileURL'] = os.path.join('/cite_data',
                                             state_ref['save_state_source_data'],
                                             '{}'.format(state_ref['uuid']))
     if state_extra_files:
         main_exec = dbm.retrieve_file_path(save_state_uuid=uuid, main_executable=True)[0]
-        state_info['gameFile'] = os.path.join('/game_data', main_exec['source_data'], main_exec['file_path'].split('/')[-1])
+        state_info['gameFileURL'] = os.path.join('/game_data', main_exec['source_data'], main_exec['file_path'].split('/')[-1])
     else:
         game_ref = dbm.retrieve_game_ref(state_ref['game_uuid'])
-        state_info['gameFile'] = os.path.join('/game_data', game_ref['source_data'], game_ref['data_image_source'])
+        state_info['gameFileURL'] = os.path.join('/game_data', game_ref['source_data'], game_ref['data_image_source'])
     return jsonify(state_info)
 
 @app.route("/json/game_info/<uuid>")
@@ -143,14 +144,14 @@ def emulation_info_game(uuid):
         gsd = game_ref['source_data']
         main_exec = dbm.retrieve_file_path(game_uuid=uuid, save_state_uuid=None, main_executable=True)
         main_fp = main_exec[0]['file_path'].split('/')[-1] if main_exec else None
-        game_info['gameFile'] = os.path.join('/game_data', gsd, gis) if gis else main_fp
+        game_info['gameFileURL'] = os.path.join('/game_data', gsd, gis) if gis else main_fp
         if game_extra_files:
-            game_info['extraFiles'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
+            game_info['fileMapping'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
                                                                                      game_extra_files)}
-            game_info['extraFileInfo'] = {f['file_path']: f for f in game_extra_files}
-        game_info['freezeFile'] = None
-        game_info['gameRecord'] = game_ref.elements
-        game_info['saveStates'] = dbm.retrieve_save_state(game_uuid=uuid)
+            game_info['fileInformation'] = {f['file_path']: f for f in game_extra_files}
+        game_info['stateFileURL'] = None
+        game_info['record'] = game_ref.elements
+        game_info['availableStates'] = dbm.retrieve_save_state(game_uuid=uuid)
     return jsonify(game_info)
 
 
@@ -224,9 +225,10 @@ def add_extra_file(uuid):
 @app.route("/state/<uuid>/add", methods=['POST'])
 def add_save_state(uuid):
     save_state_data = request.form.get('save_state_data')
+    compressed = True if request.form.get('compressed') == u'true' else False
     if save_state_data:
         save_state_b_array = bytearray(base64.b64decode(save_state_data))
-        data_length = request.form.get('data_length')
+        data_length = int(request.form.get('data_length'))
 
         if len(save_state_b_array) != data_length:
             save_state_b_array.extend([0 for _ in range(len(save_state_b_array), data_length)])
@@ -249,10 +251,10 @@ def add_save_state(uuid):
     state_uuid = dbm.add_to_save_state_table(fts=True, **fields)
     if save_state_data:
         source_data_hash, file_name = save_byte_array_to_store(save_state_b_array, file_name=state_uuid)
-        dbm.update_table(dbm.GAME_SAVE_TABLE,['save_state_source_data'], [source_data_hash], ['uuid'], [state_uuid])
+        dbm.update_table(dbm.GAME_SAVE_TABLE,['save_state_source_data', 'compressed'], [source_data_hash, compressed], ['uuid'], [state_uuid])
     #   Retrieve save state information to get uuid and ignore blank fields
     save_state = dbm.retrieve_save_state(uuid=state_uuid)[0]
-    return jsonify(save_state)
+    return jsonify({'record': save_state})
 
 @app.route("/state/<uuid>/add_data", methods=['PUT'])
 def add_save_state_data(uuid):
