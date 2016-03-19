@@ -101,7 +101,6 @@ var SHA1Generator = {
         }
     }
 };
-<<<<<<< HEAD
 
 function base64ArrayBuffer(arrayBuffer) {
   var base64    = '';
@@ -154,5 +153,3 @@ function base64ArrayBuffer(arrayBuffer) {
 
   return base64
 }
-=======
->>>>>>> compression_asyc

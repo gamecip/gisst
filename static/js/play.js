@@ -12,7 +12,6 @@ $(function() {
     var SINGULAR_STATE = "singleState";
     var DEPENDENT_STATE = "dependentState";
     var LZMA_WORKER_PATH = "/static/js/lzma_worker.js";
-    var EMULATOR_ROOT = "/static/js/emulators/";
     var STATE_CACHE_LIMIT = 10;
 
     // API Call URLs
@@ -264,7 +263,6 @@ $(function() {
                     context.emu = emu;
                     enableAudioToggle(context);
                 },
-                EMULATOR_ROOT,
                 context.currentGame.fileURL,
                 "", //blank unless saveState
                 ""  //blank unless dependent files
@@ -576,8 +574,8 @@ $(function() {
     //Load initial page information into model
     var stateUUID = $('body').data('state-uuid');
     var gameUUID = $('body').data('game-uuid');
-
     var context0 = contextFactory.getNewContext();
+    CiteState.scriptRoot = '/static/js/cite-game/';
 
     createUIForContext(context0);
     initPageLoad(context0);
