@@ -6,9 +6,8 @@ import subprocess
 import json
 import base64
 import datetime
-import calendar
+import fnmatch
 import shutil
-import dateutil.parser
 from collections import OrderedDict
 from flask import Flask, Blueprint, redirect, request, url_for, Response
 from flask import render_template, send_file, jsonify
@@ -118,7 +117,7 @@ def emulation_info_state(uuid):
     other_save_states = dbm.retrieve_save_state(game_uuid=state_ref['game_uuid'])
     state_extra_files = dbm.retrieve_file_path(save_state_uuid=uuid)
     state_info['record'] = state_ref
-    state_info['availableStates'] = other_save_states
+    state_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') else False, other_save_states)
     state_info['fileMapping'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
                                                                                       state_extra_files)} if state_extra_files else None
     state_info['fileInformation'] = {f['file_path']: f for f in state_extra_files}
@@ -151,7 +150,7 @@ def emulation_info_game(uuid):
             game_info['fileInformation'] = {f['file_path']: f for f in game_extra_files}
         game_info['stateFileURL'] = None
         game_info['record'] = game_ref.elements
-        game_info['availableStates'] = dbm.retrieve_save_state(game_uuid=uuid)
+        game_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') else False, dbm.retrieve_save_state(game_uuid=uuid))
     return jsonify(game_info)
 
 
@@ -224,53 +223,117 @@ def add_extra_file(uuid):
 
 @app.route("/state/<uuid>/add", methods=['POST'])
 def add_save_state(uuid):
-    save_state_data = request.form.get('save_state_data')
-    compressed = True if request.form.get('compressed') == u'true' else False
-    if save_state_data:
-        save_state_b_array = bytearray(base64.b64decode(save_state_data))
-        data_length = int(request.form.get('data_length'))
-
-        if len(save_state_b_array) != data_length:
-            save_state_b_array.extend([0 for _ in range(len(save_state_b_array), data_length)])
+    performance_uuid = request.form.get('performance_uuid')
+    performance_time_index = request.form.get('performance_time_index')
 
     #   Save State File to DB
     fields = OrderedDict(
         description=request.form.get('description'),
         game_uuid=uuid,
-        performance_uuid=request.form.get('performance_uuid'),
-        performance_time_index=request.form.get('performance_time_index'),
         save_state_type='state',
         emulator_name=request.form.get('emulator'),
         emulator_version=request.form.get('emulator_version'),
         emt_stack_pointer=request.form.get('emt_stack_pointer'),
         stack_pointer=request.form.get('stack_pointer'),
-        system_time=request.form.get('system_time'),
+        system_time=request.form.get('time'),
         created_on=None,
         created=datetime.datetime.now()
     )
     state_uuid = dbm.add_to_save_state_table(fts=True, **fields)
-    if save_state_data:
-        source_data_hash, file_name = save_byte_array_to_store(save_state_b_array, file_name=state_uuid)
-        dbm.update_table(dbm.GAME_SAVE_TABLE,['save_state_source_data', 'compressed'], [source_data_hash, compressed], ['uuid'], [state_uuid])
+
+    #   Attach performance information if present
+    if performance_uuid:
+        #   Sometimes a state maybe linked to a performance without a specific index?
+        if performance_time_index:
+            dbm.link_save_state_to_performance(uuid, performance_uuid, performance_time_index)
+        else:
+            dbm.link_save_state_to_performance(uuid, performance_uuid, 0)
+
     #   Retrieve save state information to get uuid and ignore blank fields
     save_state = dbm.retrieve_save_state(uuid=state_uuid)[0]
     return jsonify({'record': save_state})
 
-@app.route("/state/<uuid>/add_data", methods=['PUT'])
+@app.route("/state/<uuid>/add_data", methods=['POST'])
 def add_save_state_data(uuid):
-    save_state_data = bytearray(request.data)
-    source_data_hash, file_name = save_byte_array_to_store(save_state_data, file_name=uuid)
-    dbm.update_table(dbm.GAME_SAVE_TABLE,['save_state_source_data'], [source_data_hash], ['uuid'], [uuid])
-    return 'OK'
+    save_state_data = request.form.get('buffer')
+    compressed = True if request.form.get('compressed') == u'true' else False
+    emt_stack_pointer = request.form.get('emt_stack_pointer')
+    stack_pointer = request.form.get('stack_pointer')
+    time = request.form.get('time')
+    data_length = int(request.form.get('data_length'))
 
+    save_state_b_array = bytearray(base64.b64decode(save_state_data))
+
+    #   The base64 library will interpret trailing zeros as padding and remove them, this adds them back in
+    if len(save_state_b_array) != data_length:
+        save_state_b_array.extend([0 for _ in range(len(save_state_b_array), data_length)])
+
+    source_data_hash, file_name = save_byte_array_to_store(save_state_b_array, file_name=uuid)
+    dbm.update_table(dbm.GAME_SAVE_TABLE,
+                     ['save_state_source_data', 'compressed', 'emt_stack_pointer', 'stack_pointer', 'time'],
+                     [source_data_hash, compressed, emt_stack_pointer, stack_pointer, time],
+                     ['uuid'], [uuid])
+    return jsonify({'record': dbm.retrieve_save_state(uuid=uuid)[0]})
+
+
+@app.route("/state/<uuid>/update", methods=['POST'])
+def update_save_state(uuid):
+    update_fields = json.loads(request.form.get('update_fields'))
+
+    #   if linking to a performance, do that and then throw away since GAME_SAVE_TABLE doesn't refer to performance
+    if 'performance_uuid' in update_fields:
+        performance_uuid = update_fields['performance_uuid']
+        performance_time_index = update_fields['performance_time_index']
+        dbm.link_save_state_to_performance(uuid, performance_uuid, performance_time_index)
+        del update_fields['performance_uuid']
+        del update_fields['performance_time_index']
+
+    #   make sure that there are still fields to update
+    if len(update_fields.keys()) > 0:
+        dbm.update_table(dbm.GAME_SAVE_TABLE, update_fields.keys(),update_fields.values, ['uuid'], [uuid])
+    return jsonify({'record': dbm.retrieve_save_state(uuid=uuid)[0]})
 
 @app.route("/performance/<uuid>/add")
 def performance_add(uuid):
     game_ref = dbm.retrieve_game_ref(uuid)
-    title = "A performance of {}".format(game_ref['title'])
+    title = request.form.get('title', 'A performance of {}'.format(game_ref['title']))
     perf_ref = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, game_uuid=uuid, title=title)
     dbm.add_to_citation_table(perf_ref, fts=True)
-    return perf_ref.to_json_string()
+    return jsonify({'record': perf_ref.elements})
+
+@app.route("/performance/<uuid>/add_video_data")
+def performance_add_data(uuid):
+    md5_hash = request.form.get('md5_hash')
+    chunk_id = request.form.get('chunk_id')
+    total_chunks = request.form.get('total_chunks')
+    chunk_data = request.form.get('chunk_data')
+
+    #   If there isn't a temp directory for this hash, create one
+    temp_path = os.path.join(LOCAL_DATA_ROOT, "tmp_{}".format(md5_hash))
+    if not os.path.exists(temp_path):
+        os.makedirs(temp_path)
+
+    #   Write the chunk of data to a temp file
+    with open("{}_of_{}".format(chunk_id, total_chunks), "wb") as temp:
+        temp.write(chunk_data)
+
+    chunk_paths = [chunk for chunk in fnmatch.filter(os.listdir(temp_path), "*_of_*")]
+
+    #   See if all the chunks are written, if so concatenate into final file and add that to storage
+    if total_chunks == len(chunk_paths):
+        final_path = os.path.join(temp_path, "final_{}.mp4".format(md5_hash))
+        final_file = open(final_path, "ab")
+
+        for cp in sorted(chunk_paths, key=lambda p: int(p.split("_")[0])):
+            with open(cp, "rb") as cf:
+                final_file.write(cf.read())
+
+        final_hash = save_file_to_store(final_path)
+        shutil.rmtree(temp_path)
+
+        #   Attach data to performance record
+        dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE,['replay_source_file'], [final_hash], ["uuid"], [uuid])
+    return "OK"
 
 
 @app.route("/performance/<uuid>/update", methods=['POST'])

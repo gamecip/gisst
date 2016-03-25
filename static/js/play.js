@@ -25,8 +25,9 @@ $(function() {
     function addStateRecordURL(gameUUID){ return "/state/" + gameUUID + '/add' }
     function addStateDataURL(stateUUID){ return "/state/" + stateUUID + '/add_data' }
     function addExtraFileRecordURL(stateUUID){ return "/extra_file/" + stateUUID + '/add'}
-    function addPerformanceRecordURL(gameUUID){ return "/performance/" + gameUUID +'/add'}
-    function updatePerformanceRecordURL(perfUUID){ return "/performance/" + perfUUID +'/update'}
+    function addPerformanceRecordURL(gameUUID){ return "/performance/" + gameUUID + '/add'}
+    function updatePerformanceRecordURL(perfUUID){ return "/performance/" + perfUUID + '/update'}
+    function addPerformanceVideoURL(perfUUID){ return "/performance" + perfUUID + '/add_video_data'}
 
     //Simple context factory
     var contextFactory = (function(){
@@ -36,17 +37,17 @@ $(function() {
             counter += 1;
         }
         function registerContext(id, context){
-            contextHash.id = context;
+            contextHash[id] = context;
         }
         return {
             getNewContext: function(){
                 var nc = {
                     id: counter,
                     emu: "",
-                    lastState: {},
+                    lastState: "",
                     availableStates: [],
                     statesCache: [],
-                    currentGame: {},
+                    currentGame: "",
                     currentPerformance: "",
                     ui: { //stubbed out here just for autocomplete convenience in IntelliJ
                         root: "",
@@ -62,12 +63,16 @@ $(function() {
                         mostRecentState: "",
                         stateListing: "",
                         performanceInfo: "",
-                        recordingButton: "",
-                        fileInformation: ""
+                        startRecordingButton: "",
+                        stopRecordingButton: "",
+                        fileInformation: "",
+                        performanceTitle: "",
+                        performanceDescription: ""
                     },
-                    stateSaveQueue: async.queue(processStateSave, 2),
-                    performanceSaveQueue: async.queue(processPerformanceSave, 2)
+                    stateDataSaveQueue: async.queue(processStateDataSave, 2),
+                    performanceDataSaveQueue: async.queue(processPerformanceDataSave, 2)
                 };
+                registerContext(nc.id, nc);
                 increaseCount();
                 return nc;
             },
@@ -91,7 +96,7 @@ $(function() {
 
         //Emulation Container
         context.ui.emulationContainer = createElementForContext(context, "div", "emulationContainer", "", $contextRoot);
-        context.ui.emulationContainer.css({ "height": "480px", width: "640px"});
+        context.ui.emulationContainer.css({ "height": "480px", width: "512px"});
 
         //Emulation Controls
         $emulationControls = createElementForContext(context, "div", "emulationControls", "", $contextRoot);
@@ -116,15 +121,21 @@ $(function() {
 
         //State Information
         context.ui.stateInfo = createElementForContext(context, "div", "stateInfo", "<h3>State Information</h3>", $contextRoot);
-        context.ui.mostRecentState = createElementForContext(context, "div", "mostRecentState", "<h4>Most Recent State</h4>", context.ui.stateInfo);
+        context.ui.mostRecentState = createElementForContext(context, "div", "mostRecentState", "", context.ui.stateInfo);
         context.ui.stateListing = createElementForContext(context, "div", "stateListing", "<h4>Saved States</h4>", context.ui.stateInfo);
 
         //Performance Information
         context.ui.performanceInfo = createElementForContext(context, "div", "performanceInfo", "<h3>Performance Information</h3>", $contextRoot);
+        context.ui.performanceTimer = createElementForContext(context, "div", "performanceTimer", "", context.ui.performanceInfo);
+        $performanceTitleDiv = createElementForContext(context, "div", "performanceTitleDiv", "Title: ", context.ui.performanceInfo);
+        context.ui.performanceTitle = createElementForContext(context, "input", "peformanceTitleInput", "", $performanceTitleDiv);
+        $performanceDescriptionDiv = createElementForContext(context, "div", "performanceTitleDiv", "Description: ", context.ui.performanceInfo);
+        context.ui.performanceDescription = createElementForContext(context, "input", "performanceDescriptionInput", "", $performanceDescriptionDiv);
 
         //Performance Controls
         $performanceControls = createElementForContext(context, "div", "performanceControls", "", $contextRoot);
-        context.ui.recordingButton = createElementForContext(context, "button", "recordingButton", "Start Recording", $performanceControls);
+        context.ui.startRecordingButton = createElementForContext(context, "button", "startRecordingButton", "Loading emulation...", $performanceControls);
+        context.ui.stopRecordingButton = createElementForContext(context, "button", "stopRecordingButton", "Stop Recording", $performanceControls);
 
         //File System Listing
         context.ui.fileInformation = createElementForContext(context, "div", "fileInformation", "<h3>File Information</h3>", $contextRoot);
@@ -137,10 +148,18 @@ $(function() {
         return $("<"+elementType+"/>", {id: context.id +"_"+elementName, html: elementHtml}).appendTo(parentNode);
     }
 
+    function updateUI(err, context, cb){
+        async.series([
+            async.apply(updateGameUI, context),
+            updateStateUI,
+            updatePerformanceUI
+        ], cb)
+    }
+
     function updateGameUI(context){
         if(!$.isEmptyObject(context.currentGame.fileInformation))
             updateFileListing(context);
-        if(!$.isEmptyObject(context.lastState))
+        if(context.lastState)
             updateCurrentState(context);
         updateSaveStateListing(context);
     }
@@ -151,50 +170,46 @@ $(function() {
         updateFileListing(context)
     }
 
-    function updatePerformanceUI(context){
-        updateCurrentPerformanceInfo(context);
-    }
-
-    function updateCurrentPerformanceInfo(context){
-
+    function updatePerformanceUI(context, callback){
+        callback(null, context);
     }
 
     function updateSaveStateListing(context){
         context.ui.stateListing.empty();
-        context.ui.stateListing.append('<h4>Save States Available</h4>');
-        $stateList = $("<ul/>");
-        for(var i=0; i < context.availableStates.length; i++){
-            var state = context.availableStates[i];
-            $('<li/>', {
-                "class": context.id + "_loadableState",
-                text: state['description']
-            }).attr('data-state-uuid', state['uuid'])
-                .appendTo($stateList);
+        if(context.availableStates.length > 0){
+            context.ui.stateListing.append('<h4>Save States Available</h4>');
+            $stateList = $("<ul/>");
+            for(var i=0; i < context.availableStates.length; i++){
+                var state = context.availableStates[i];
+                $('<li/>', {
+                    "class": context.id + "_loadableState",
+                    text: state['description']
+                }).attr('data-state-uuid', state['uuid'])
+                    .appendTo($stateList);
+            }
+            context.ui.stateListing.append($stateList);
+            $('.'+context.id+'_loadableState').click(createLoadableClickHandler(context))
         }
-        context.ui.stateListing.append($stateList);
-        $('.'+context.id+'_loadableState').click(createLoadableClickHandler(context))
     }
 
     function createLoadableClickHandler(context){
         return function(event){
             var uuid = $(this).data('state-uuid');
-            initLoadState(context, uuid);
+            initLoadState(context, {record:{uuid: uuid}}, updateState);
         }
     }
 
     function updateFileListing(context){
         var fi;
         if("fileInformation" in context.currentGame){
-            if(!$.isEmptyObject(context.lastState)){
+            if(context.lastState){
                 fi = context.lastState.fileInformation;
             }else{
                 fi = context.currentGame.fileInformation;
             }
-        }else{
-            fi = {};
         }
         context.ui.fileInformation.empty();
-        if(!$.isEmptyObject(fi)){
+        if(fi){
             context.ui.fileInformation.append('<h3>Current Active Files</h3>');
             $fileList = $('<ul/>');
             for(var filePath in fi){
@@ -206,45 +221,40 @@ $(function() {
 
     function updateCurrentState(context){
         context.ui.mostRecentState.empty();
-        context.ui.mostRecentState.append('<h3>Most Recent Save State</h3>');
-        $('<div/>', {
-            id: context.id + '_mostRecentStateDiv',
-            text: context.lastState.record.description
-        }).attr('data-state-uuid', context.lastState.record.uuid)
-            .appendTo(context.ui.mostRecentState);
-        $('#' + context.id + '_mostRecentStateDiv').click(createLoadableClickHandler(context))
+        if(context.lastState){
+            context.ui.mostRecentState.append('<h4>Most Recent Save State</h4>');
+            $('<div/>', {
+                id: context.id + '_mostRecentStateDiv',
+                text: context.lastState.record.description
+            }).attr('data-state-uuid', context.lastState.record.uuid)
+                .appendTo(context.ui.mostRecentState);
+            $('#' + context.id + '_mostRecentStateDiv').click(createLoadableClickHandler(context))
+        }
     }
 
 
     //002 Async Function Management
 
 
-    function preLoadStateFromServer(context, task, callback){
+    function preLoadStateFromServer(task, callback){
         async.waterfall([
-            async.apply(asyncGetStateInfo, context, task.info, task.data),
-            asyncLoadStateArray,
-            decompressStateByteArray
+            async.apply(asyncGetStateInfo, task.context, task.info),
+            asyncLoadStateArray
         ], callback);
     }
 
     function loadStateFromServer(task, callback){
-        preLoadStateFromServer(task.context, task, function(err, context, info, data){
-            var dataObj = {};
-            if("emt_stack_pointer" in info.record && info.record['emt_stack_pointer']){
-                dataObj.emtStack = info.record.emt_stack_pointer;
-                dataObj.stack = info.record.stack_pointer;
-                dataObj.heap = data.buffer;
-                dataObj.time = info.record.system_time;
-            } else {
-                dataObj = data.buffer;
+        preLoadStateFromServer(task, function(err, context, info, data){
+            if(!task.context.currentGame.isSingleFile){
+                data.emtStack = info.record.emt_stack_pointer;
+                data.stack = info.record.stack_pointer;
+                data.time = info.record.time;
             }
-            context.emu.loadState(dataObj, function(stateData){ //unused since redundant data
-                callback(err, context, info, data);
-            });
+            asyncLoadState(context, info, data, callback);
         })
     }
 
-    function asyncLoadStateArray(context, info, data, callback){
+    function asyncLoadStateArray(context, info, callback){
         var xhr = new XMLHttpRequest();
         xhr.open('GET', info.stateFileURL, true);
         xhr.responseType = 'arraybuffer';
@@ -257,120 +267,236 @@ $(function() {
     function enableStartEmulation(context){
         context.ui.startEmulationButton.html("Start Emulation");
         context.ui.startEmulationButton.click(function(e){
-            var args = [
-                context.ui.emulationContainer.attr('id'),
-                function(emu){
-                    context.emu = emu;
-                    enableAudioToggle(context);
-                },
-                context.currentGame.fileURL,
-                "", //blank unless saveState
-                ""  //blank unless dependent files
-            ];
-            if(!$.isEmptyObject(context.lastState)){
-                args[4] = context.lastState.data.buffer;
-                if(!$.isEmptyObject(context.lastState.fileMapping)){
-                    args[5] = context.lastState.fileMapping;
-                }
-            }else if(!$.isEmptyObject(context.currentGame.fileMapping)){
-                args[5] = context.currentGame.fileMapping;
-            }
-            CiteState.cite.apply(this, args);
+            asyncStartEmulation(context, updateUI)
         })
     }
 
     function enableAudioToggle(context){
         context.ui.toggleAudioButton.click(function(e){
-            context.emu.setMuted(!emu.isMuted());
+            context.emu.setMuted(!context.emu.isMuted());
             context.ui.toggleAudioButton.html(context.emu.isMuted() ? "Audio Off" : "Audio On");
         });
     }
 
     function enableSaveState(context){
-        context.ui.saveStateButton.click(function(e){
-            context.emu.saveState(function(stateData){
-                if(context.currentGame.isSingleFile){
-                    context.stateSaveQueue.push(createStateSaveTask(context,
-                        context.currentGame,
-                        {buffer: stateData, compressed: false},
-                        SINGULAR_STATE,
-                        context.ui.stateDescription.val()
-                    ), updateState)
-                }else{
-                    context.stateSaveQueue.push(createStateSaveTask(context,
-                        context.currentGame,
-                        {
-                            buffer: new Uint8Array(stateData.heap),
-                            compressed: false,
-                            emtStack: stateData.emtStack,
-                            stack: stateData.stack,
-                            time: stateData.time
-                        },
-                        DEPENDENT_STATE,
-                        context.ui.stateDescription.val()
-                    ), updateState)
+        context.ui.saveStateButton.click(function(){
+            initSaveState(context, updateState);
+        })
+    }
+
+    function asyncAddStateToPerformance(context, stateInfo, callback){
+
+    }
+
+    function initSaveState(context, callback){
+        context.emu.saveState(function(stateData){
+            var record = {
+                description: context.ui.stateDescription.val(),
+                emulator: context.emu.emulator
+            };
+
+            if(context.currentPerformance){
+                record.performance_uuid = context.currentPerformance.record.uuid;
+                if(context.isRecording) record.performance_time_index = Date.now() - context.startedRecordingTime;
+                //  Check to see if this is a state save terminal
+                if(context.hasFinishedRecording){
+                    record.performance_time_index = Date.now() - context.previousStartedRecordingTime;
+                    context.hasFinishedRecording = false;
                 }
-            });
+            }
+            addStateRecordAJAX(context, {record: record}, {},
+                function(err, context, info){
+                    if(context.currentGame.isSingleFile){
+                        context.stateDataSaveQueue.push(createSaveStateDataTask(context,
+                            info,
+                            {buffer: stateData, compressed: false},
+                            SINGULAR_STATE
+                        ), callback)
+                    }else{
+                        context.stateDataSaveQueue.push(createSaveStateDataTask(context,
+                            info,
+                            {
+                                buffer: new Uint8Array(stateData.heap),
+                                compressed: false,
+                                emt_stack_pointer: stateData.emtStack,
+                                stack_pointer: stateData.stack,
+                                time: stateData.time
+                            },
+                            DEPENDENT_STATE
+                        ), callback)
+                    }
+                });
         });
     }
 
     function enableLoadLastState(context){
         context.ui.loadLastStateButton.click(function(e){
-            initLoadState(context, context.lastState.record.uuid);
+            initLoadState(context, context.lastState, updateState);
         });
     }
 
-    function initLoadState(context, stateUUID){
+    function enableStartRecordPerformance(context){
+        context.ui.startRecordingButton.html("Start Recording");
+        context.ui.startRecordingButton.click(function(e){
+            var tasks = [
+                async.apply(addPerformanceRecordAJAX, context),
+                updatePerformance
+            ];
+            if(context.emu){
+                //start recording, save new initial state for performance
+                tasks.push(asyncStartRecording);
+                tasks.push(initSaveState);
+            }else{
+                //start emulation and recording
+                tasks.push(asyncStartEmulationWithRecording);
+
+                if(context.lastState){
+                    //save init state as performance initial if present
+                    tasks.push(
+                        async.compose(
+                            async.apply(asyncAddStateToPerformance, context, context.lastState.record),
+                            updatePerformance
+                        )
+                    )
+                }
+            }
+            async.series(tasks, function(err, results){
+                updateUI(context)
+            })
+        })
+    }
+
+    function enableStopRecordPerformance(context){
+        context.ui.stopRecordingButton.click(function(e){
+            if(context.isRecording){
+                var tasks = [
+                    async.apply(asyncStopRecording, context),
+                    function(err, context, data, callback){
+                        context.performanceDataSaveQueue.push(createPerformanceSaveTask(
+                            context,
+                            context.currentPerformance,
+                            data
+                        ),updatePerformance);
+                        callback(null, context);
+                    }
+                ];
+                async.waterfall(tasks, function(err, context){
+                    initSaveState(context, updateState);
+                    updateFullContext(context);
+                })
+            }
+        })
+    }
+
+    function asyncStartEmulation(context, callback){
+        CiteState.cite.apply(this, prepArgsForCiteState(context, callback, {mute:true}))
+    }
+
+    function asyncStartEmulationWithRecording(context, callback){
+        CiteState.cite.apply(this.prepArgsForCiteState(context, callback, {mute:false, recorder: {autoStart: true}}))
+    }
+
+    function prepArgsForCiteState(context, cb, options){
+        var args = [
+            context.ui.emulationContainer.attr('id'),
+            function(emu){
+                context.emu = emu;
+                enableAudioToggle(context);
+                cb(null, context)
+            },
+            context.currentGame.fileURL,
+            null, //blank unless saveState
+            null  //blank unless dependent files
+            //options are next argument if needed
+        ];
+        if(context.lastState){
+            args[3] = context.lastState.data.buffer;
+            if(!$.isEmptyObject(context.lastState.fileMapping)){
+                args[4] = context.lastState.fileMapping;
+            }
+        }else if(!$.isEmptyObject(context.currentGame.fileMapping)){
+            args[4] = context.currentGame.fileMapping;
+        }
+        if(options){
+            args.push(options)
+        }
+        return args;
+    }
+
+    function asyncStartRecording(context, callback){
+        if(!context.isRecording){
+            context.emu.startRecording(function(){
+                context.isRecording = true;
+                context.startedRecordingTime = Date.now();
+                callback(null, context)
+            })
+        }else{
+            callback(new Error("Cannot start recording on context "+context.id+" it is already recording"), context)
+        }
+    }
+
+    function asyncStopRecording(context, callback){
+        if(!context.isRecording){
+            context.emu.finishRecording(function(videoData){
+                context.isRecording = false;
+                context.previousStartedRecordingTime = context.startedRecordingTime;
+                //  Needed to signal to saveState that it should look for the previous started time
+                context.hasFinishedRecording = true;
+                context.startedRecordingTime = 0;
+                callback(null, context, {buffer: videoData, compressed: false})
+            })
+        }else{
+            callback(new Error("Cannot stop recording on context "+context.id+" because it hasn't started"), context, {})
+        }
+    }
+
+    function asyncLoadState(context, info, data, callback){
+        // Decompress data if needed, otherwise just pass as is (decompress function will ignore uncompressed data)
+        // Do not modify the data object directly, as it will get passed along to the cache
+        // and we don't want uncompressed data in the cache since that might blow up the browser
+        decompressStateByteArray(context, info, data, function(err, c, i, d){
+            var dataToLoad = {};
+            if(context.currentGame.isSingleFile){
+                dataToLoad = d.buffer;
+            } else{
+                dataToLoad.heap = d.buffer;
+                dataToLoad.time = d.time;
+                dataToLoad.emtStack = d.emtStack;
+                dataToLoad.stack = d.stack;
+            }
+            //pass dataToLoad with uncompressed buffer to loadState, but pass original data object down the line
+            context.emu.loadState(dataToLoad, function(){
+                callback(context, info, data)
+            })
+        })
+    }
+
+    function initLoadState(context, info, callback){
         //check cache
-        for(var i = 0; i < context.statesCache; i++){
-            if(statesCache[i].info.record.uuid === stateUUID){
-                loadStateFromCache(context, statesCache[i]);
+        for(var i = 0; i < context.statesCache.length; i++){
+            if(context.statesCache[i].info.record.uuid === info.record.uuid){
+                loadStateFromCache(context, context.statesCache[i], callback);
                 return;
             }
         }
         //init async if not found
         for(var i = 0; i < context.availableStates.length; i++){
             var state = context.availableStates[i];
-            if(state.uuid === stateUUID){ //rely on var scoping to function
+            if(state.uuid === info.record.uuid){ //rely on var scoping to function
                 break;
             }
         }
-
-        loadStateFromServer(createStateLoadTask(context, {record: state}), function(err, context, info, data){
-            updateState(context, info, data);
-        });
+        loadStateFromServer(createStateLoadTask(context, {record: state}), callback);
     }
 
-    function loadStateFromCache(context, cache){
-        var dataObj = {};
-        //TODO: change this check to use context.currentGame.isSingleFile flag
-        if("emt_stack_pointer" in cache.info.record && cache.info.record['emt_stack_pointer']){
-            dataObj.emtStack = cache.info.record.emt_stack_pointer;
-            dataObj.stack = cache.info.record.stack_pointer;
-            dataObj.heap = cache.data.buffer;
-            dataObj.time = cache.info.record.system_time;
-        } else {
-            dataObj = cache.data.buffer;
-        }
-
-        if(cache.data.compressed){
-            decompressStateByteArray(context, cache.info, cache.data, function(err, context, info, data){
-                if("emtStack" in dataObj) {
-                    dataObj.heap = data.buffer;
-                } else {
-                    dataObj = data.buffer
-                }
-                context.emu.loadState(dataObj, function(d){ updateState(context, cache.info, cache.data); });
-            })
-        }else{
-            context.emu.loadState(dataObj, function(d){ updateState(context, cache.info, cache.data)});
-        }
+    function loadStateFromCache(context, cache, callback){
+            asyncLoadState(context, cache.info, cache.data, callback);
     }
 
     //State Save Task Factory Functions (just to make sure task object is consistent)
-    function createStateSaveTask(context, gameInfo, stateData, stateType, stateDescription){
-        //needed for capturing ui description, might add stateInfo as parameter if more complementary information is needed
-        gameInfo.stateDescription = stateDescription;
+    function createSaveStateDataTask(context, gameInfo, stateData, stateType){
+        //needed for capturing ui description, as the label could change after call
+        //might add stateInfo as parameter if more complementary information is needed
         return {context: context, info: gameInfo, data: stateData, type: stateType}
     }
 
@@ -379,32 +505,90 @@ $(function() {
         return {context: context, info: stateInfo, data: stateData, type: stateType}
     }
 
+    function createPerformanceSaveTask(context, perfInfo, perfData){
+        perfInfo.title = context.ui.performanceDescription.val();
+        return {context: context, info: perfInfo, data: perfData}
+    }
+
     //Manage the compression and uploading of save state data
-    function processStateSave(task, callback){
+    function processStateDataSave(task, callback){
         var tasks;
         if(task.type === SINGULAR_STATE){
             tasks = [
-                async.apply(addStateRecordAJAX, task.context, task.info, task.data),
-                asyncGetStateInfo
+                async.apply(asyncSaveStateData,task.context, task.info, task.data)
             ];
         }else if(task.type === DEPENDENT_STATE){
             tasks = [
                 async.apply(compressStateByteArray, task.context, task.info, task.data),
-                addStateRecordAJAX,
+                asyncSaveStateData,
                 asyncSaveExtraFiles,
-                asyncFileSaveTasks,
-                asyncGetStateInfo
+                asyncFileSaveTasks
             ];
         }
-        async.waterfall(tasks,
-            function(err, context, info, data){
-                if(err) console.log("Error with state save of " + task.info.uuid);
-                callback(context, info, data);
-            })
+        async.waterfall(tasks, function(err, context, info, data){
+            if(err) console.log("Error with state save of " + task.info.record.uuid);
+            asyncGetStateInfo(context, info, function(e, c, i){
+                callback(c, i, data);
+            });
+        })
     }
 
-    function processPerformanceSave(task, callback){}
+    function processPerformanceDataSave(task, callback){
+        asyncSaveVideoFile(task.context, task.data, function(err, results){
+            asyncGetPerformanceInfo(context, task.info, callback);
+        });
+    }
 
+    function asyncSaveStateData(context, info, data, callback){
+        //Convert ByteArray to Base64 for transfer
+        var tempArray = data.buffer;
+        data.data_length = data.buffer.length;
+
+        data.buffer = StringView.bytesToBase64(data.buffer);
+        $.post(addStateDataURL(info.record.uuid), data, function(i){
+            data.buffer = tempArray;
+            callback(null, context, i, data)
+        })
+    }
+
+    function asyncSaveVideoFile(context, data, callback){
+        var tasks = [];
+        var chunkIndex = 0;
+        var blob = new Blob(data.buffer);
+        var totalBytesSent = 0;
+        var md5 = SHA1Generator.calcSHA1FromByte(data.buffer);
+        var perfUUID = context.currentPerformance.record.uuid;
+        var targetURL = addPerformanceVideoURL(perfUUID);
+
+        while(totalBytesSent < blob.size){
+            var chunkData = blob.slice(chunkIndex * chunkSize, (chunkIndex + 1) * chunkSize);
+            tasks.push(createSaveFileChunkTask(targetURL, md5, chunkIndex, chunkData, blob.size));
+            chunkIndex++;
+        }
+        //  Need to get the remaining data, which is less than chunk size
+        tasks.push(createSaveFileChunkTask(targetURL, md5, chunkIndex, blob.slice(chunkIndex * chunkSize), blob.size));
+
+        async.parallel(tasks, function(err, results){
+            if (err) console.log("Error saving video file for performance: {}".format(perfUUID));
+            callback(err, results)
+        })
+    }
+
+    function createSaveFileChunkTask(targetURL, md5Hash, chunkId, chunkData, totalChunks){
+        var data = FormData();
+        data.append("total_chunks", totalChunks);
+        data.append("chunk_id", chunkId);
+        data.append("chunk_data", chunkData);
+        data.append("md5_hash", md5Hash);
+        return function(cb){
+            var request = new XMLHttpRequest();
+            request.open("POST", targetURL);
+            request.onload(function(result){
+                cb(null, result);
+            });
+            request.send(data);
+        }
+    }
 
     //Wraps saveExtraFiles to capture async err, and pass arguments forward in the chain
     function asyncSaveExtraFiles(context, info, data, callback){
@@ -416,7 +600,7 @@ $(function() {
 
     function asyncFileSaveTasks(context, info, data, callback){
         var tasks = [];
-        var fileInformation = !$.isEmptyObject(context.lastState) ? context.lastState.fileInformation : context.currentGame.fileInformation;
+        var fileInformation = context.lastState ? context.lastState.fileInformation : context.currentGame.fileInformation;
         // Organize individual POSTs for files
         for(var file in info.fileMapping){
             var cleanFilePath;
@@ -465,7 +649,7 @@ $(function() {
                 callback(err, context, info, data);
             },
             function on_progress(percent){
-                console.log('Compressing state data from '+ info.record.title + " " + percent + "% complete");
+                console.log('Compressing state data from '+ info.record.description + " " + percent + "% complete");
             }
         )
     }
@@ -476,47 +660,83 @@ $(function() {
             lzma.decompress(data.buffer,
             function on_finish(result, err){
                 if (err) console.log("Error with decompression of state data for " + info.uuid);
-                data.buffer = result;
-                data.data_length = result.length;
-                data.compressed = false;
+                var d = {};
+                //Copy keys that we don't care about
+                for(var key in data){
+                    d[key] = data[key];
+                }
+                //Change the ones we do
+                d.buffer = result;
+                d.data_length = result.length;
+                d.compressed = false;
                 lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
-                callback(err, context, info, data)
+                //Return new data object
+                callback(err, context, info, d)
             },
             function on_progress(percent){
                 //TODO: progress update for state load
             })
         }else{
+            //Nothing to decompress, so just ignore
             callback(null, context, info, data)
         }
     }
 
-    function addStateRecordAJAX(context, gameInfo, data, callback){
-        var dataObject = {
-            save_state_data: StringView.bytesToBase64(data.buffer),
-            description: gameInfo.stateDescription,
-            emulator: context.emu.emulator,
-            data_length: data.buffer.length,
-            compressed: data.compressed
-        };
-        //Check for additional info for DOSBox States
-        if("emtStack" in data) dataObject.emt_stack_pointer = data.emtStack;
-        if("stack" in data) dataObject.stack_pointer = data.stack;
-        if("time" in data) dataObject.system_time = data.time;
+    function addStateRecordAJAX(context, stateInfo, data, callback){
+        var dataObject = {};
+        //  Copy additional descriptions if needed
+        for(var key in stateInfo.record){
+            dataObject[key] = stateInfo.record[key]
+        }
         //Need to wrap callback function to pass null for err and ignore all but returned JSON data
-        $.post(addStateRecordURL(gameInfo.record.uuid),
+        $.post(addStateRecordURL(context.currentGame.record.uuid),
             dataObject,
-            function(sInfo){ callback(null, context, sInfo, data)});
+            function(sInfo){ callback(null, context, sInfo)});
     }
 
-    function asyncGetStateInfo(context, stateInfo, stateData, callback){
-        $.get(jsonStateInfoURL(stateInfo.record.uuid), "", function(info){ callback(null, context, info, stateData)})
+    function addPerformanceRecordAJAX(context, callback){
+        var title = context.ui.peformanceTitle.val() || "A peformance of " + context.currentGame.record.title;
+        var description = context.ui.performanceDescription.val() || "";
+        $.post(addPerformanceRecordURL(context.currentGame.record.uuid),
+            {title: title, description: description},
+            function(info){ callback(null, context, info)})
     }
 
-    function asyncGetGameInfo(context, gameInfo, callback){
-        $.get(jsonGameInfoURL(gameInfo.record.uuid), "", function(info){ callback(null, context, info)} )
+    function asyncGetStateInfo(context, info, callback){
+        $.get(jsonStateInfoURL(info.record.uuid), "", function(info){ callback(null, context, info)})
     }
+
+    function asyncGetGameInfo(context, info, callback){
+        $.get(jsonGameInfoURL(info.record.uuid), "", function(info){ callback(null, context, info)} )
+    }
+
+    function asyncGetPerformanceInfo(context, info, callback){
+        $.get(jsonPerformanceInfoURL(info.record.uuid), "", function(info){ callback(null, context, info, data)})
+    }
+
+    function updateFullContext(context){
+        var getAndUpdateState = async.compose(
+            async.apply(asyncGetStateInfo, context, context.lastState.record),
+            rightAsyncPartial(updateState, this, context.lastState.data)
+        );
+        var getAndUpdatePerformance = async.compose(
+            async.apply(asyncGetPerformanceInfo, context, context.currentPerformance.record),
+            updatePerformance
+        );
+        var getAndUpdateGame = async.compose(
+            async.apply(asyncGetGameInfo, context, context.currentGame.record),
+            updateGame
+        );
+        async.series([
+            getAndUpdateGame,
+            getAndUpdateState,
+            getAndUpdatePerformance
+        ], updateUI)
+    }
+
 
     function updateState(context, info, data){
+        if(!context.lastState) context.lastState = {};
         context.lastState.record = info.record;
         context.lastState.data = data;
         context.lastState.fileMapping = info.fileMapping || "";
@@ -532,6 +752,7 @@ $(function() {
     }
 
     function updateGame(context, info){
+        if(!context.currentGame) context.currentGame = {};
         context.currentGame.record = info.record;
         context.currentGame.isSingleFile = $.isEmptyObject(info.fileMapping);
         context.currentGame.fileURL = info.gameFileURL;
@@ -541,10 +762,23 @@ $(function() {
         updateGameUI(context);
     }
 
-    function updatePerformance(context, info){
+    function updatePerformance(context, info, callback){
+        if(!context.performance) context.performance = {};
         context.performance.record = info.record;
         context.performance.linkedStates = info.linkedStates;
-        updatePerformanceUI(context);
+        updatePerformanceUI(context, callback);
+    }
+
+    //right apply for async partials, taken from:
+    //http://aeflash.com/2013-06/async-and-functional-javascript.html
+    function rightAsyncPartial(fn, thisArg){
+        var boundArgs = Array.prototype.slice.call(arguments, 2);
+        return function(){
+            var args = Array.prototype.slice.call(arguments, 0);
+            var callback = args.pop();
+            //call fn with the args in the right order, (this, args...., callback)
+            fn.apply(thisArg, args.concat(boundArgs).push(callback))
+        }
     }
 
     //003-----------PAGE SPECIFIC------------------------
@@ -565,7 +799,8 @@ $(function() {
             updateGame(results[0][0], results[0][1]);
             if(stateUUID) updateState(results[1][0], results[1][1], results[1][2]);
             enableStartEmulation(context);
-            enableAudioToggle(context);
+            enableStartRecordPerformance(context);
+            enableStopRecordPerformance(context);
             enableLoadLastState(context);
             enableSaveState(context);
         })
@@ -579,5 +814,4 @@ $(function() {
 
     createUIForContext(context0);
     initPageLoad(context0);
-
 });

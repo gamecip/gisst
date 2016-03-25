@@ -123,8 +123,6 @@ class DatabaseManager:
             ('uuid',                                'text',                 field_constraint),
             ('description',                         'text',                 field_constraint),
             ('game_uuid',                           'text',                 field_constraint),
-            ('performance_uuid',                    'text',                 field_constraint),
-            ('performance_time_index',              'integer',              field_constraint),
             ('save_state_source_data',              'text',                 field_constraint),
             ('compressed',                          'boolean',              field_constraint),
             ('save_state_type',                     'text',                 field_constraint), #  Values are 'battery', or 'state', may make ENUM later
@@ -149,10 +147,6 @@ class DatabaseManager:
             ('replay_source_file_ref',              'text',                 field_constraint),
             ('replay_source_file_name',             'text',                 field_constraint),
             ('recording_agent',                     'text',                 field_constraint),
-            ('save_state_source_purl',              'text',                 field_constraint),
-            ('save_state_source_file_ref',          'text',                 field_constraint),
-            ('save_state_terminal_purl',            'text',                 field_constraint),
-            ('save_state_terminal_file_ref',        'text',                 field_constraint),
             ('emulator_name',                       'text',                 field_constraint),
             ('emulator_version',                    'text',                 field_constraint),
             ('emulator_operating_system',           'text',                 field_constraint),
@@ -186,7 +180,6 @@ class DatabaseManager:
     }
 
 
-    #   TODO: change this to use absolute path to specific db directory
     @classmethod
     def delete_db(cls):
         try:
@@ -353,8 +346,6 @@ class DatabaseManager:
         values.append(fields.get('uuid', uid))
         values.append(fields.get('description'))
         values.append(fields.get('game_uuid'))
-        values.append(fields.get('performance_uuid'))
-        values.append(fields.get('performance_time_index'))
         values.append(fields.get('save_state_source_data'))
         values.append(fields.get('compressed'))
         values.append(fields.get('save_state_type'))
@@ -400,6 +391,17 @@ class DatabaseManager:
             return []
 
         return cls.insert_into_table(cls.GAME_FILE_PATH_TABLE, cls.headers[cls.GAME_FILE_PATH_TABLE], new_values)
+
+    @classmethod
+    def link_save_state_to_performance(cls, state_uuid, perf_uuid, time_index):
+        if cls.is_attr_in_db('uuid', state_uuid, cls.GAME_SAVE_TABLE) and \
+                cls.is_attr_in_db('uuid', perf_uuid, cls.PERFORMANCE_CITATION_TABLE):
+            cls.insert_into_table(cls.SAVE_STATE_PERFORMANCE_LINK_TABLE,
+                                  ['save_state_uuid', 'performance_uuid', 'time_index'],
+                                  [state_uuid, perf_uuid, time_index])
+            return cls.retrieve_state_perf_link(state_uuid, perf_uuid)
+        else:
+            return None
 
     #   Check if we already have the file in the database
     @classmethod
@@ -479,6 +481,16 @@ class DatabaseManager:
     def retrieve_save_state(cls, **fields):
         states =  cls.retrieve_multiple_attr_from_db(fields.keys(), fields.values(), cls.GAME_SAVE_TABLE, cls.AND)
         return [OrderedDict(zip(cls.headers[cls.GAME_SAVE_TABLE], state_tuple)) for state_tuple in states]
+
+    @classmethod
+    def retrieve_state_perf_link(cls, state_uuid, perf_uuid):
+        link = cls.retrieve_multiple_attr_from_db(['save_state_uuid', 'performance_uuid'],
+                                                  [state_uuid, perf_uuid],
+                                                  cls.SAVE_STATE_PERFORMANCE_LINK_TABLE, cls.AND)
+        if link:
+            return OrderedDict(zip(cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE], link[0]))
+        else:
+            return None
 
     #   For now returns list of dicts with relevant path information
     @classmethod
