@@ -207,7 +207,8 @@ class DatabaseManager:
                       cls.GAME_CITATION_TABLE,
                       cls.PERFORMANCE_CITATION_TABLE,
                       cls.GAME_SAVE_TABLE,
-                      cls.GAME_FILE_PATH_TABLE):
+                      cls.GAME_FILE_PATH_TABLE,
+                      cls.SAVE_STATE_PERFORMANCE_LINK_TABLE):
             if not cls.check_for_table(table):
                 click.echo("Table '{}' not found, creating...".format(table))
                 cls.create_table(table, cls.fields[table])
@@ -491,6 +492,15 @@ class DatabaseManager:
             return OrderedDict(zip(cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE], link[0]))
         else:
             return None
+
+    @classmethod
+    def retrieve_all_state_perf_links(cls, perf_uuid):
+        links = cls.retrieve_multiple_attr_from_db(['performance_uuid'],
+                                                   [perf_uuid],
+                                                   cls.SAVE_STATE_PERFORMANCE_LINK_TABLE)
+        link_info = [{'state_record': cls.retrieve_save_state(uuid=link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('save_state_uuid')])[0],
+                      'time_index': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('time_index')] } for link in links]
+        return link_info
 
     #   For now returns list of dicts with relevant path information
     @classmethod

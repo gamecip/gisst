@@ -153,6 +153,13 @@ def emulation_info_game(uuid):
         game_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') else False, dbm.retrieve_save_state(game_uuid=uuid))
     return jsonify(game_info)
 
+@app.route("/json/performance_info/<uuid>")
+def performance_info(uuid):
+    perf_info = {}
+    perf_ref = dbm.retrieve_perf_ref(uuid)
+    perf_info['record'] = perf_ref.elements
+    perf_info['linkedStates'] = dbm.retrieve_all_state_perf_links(uuid)
+    return jsonify(perf_info)
 
 
 @app.route("/play/<uuid>")
@@ -293,20 +300,29 @@ def update_save_state(uuid):
         dbm.update_table(dbm.GAME_SAVE_TABLE, update_fields.keys(),update_fields.values, ['uuid'], [uuid])
     return jsonify({'record': dbm.retrieve_save_state(uuid=uuid)[0]})
 
-@app.route("/performance/<uuid>/add")
+@app.route("/performance/<uuid>/add", methods=['POST'])
 def performance_add(uuid):
     game_ref = dbm.retrieve_game_ref(uuid)
     title = request.form.get('title', 'A performance of {}'.format(game_ref['title']))
-    perf_ref = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, game_uuid=uuid, title=title)
+    description = request.form.get('description')
+    perf_ref = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION,
+                                 game_uuid=uuid, title=title, description=description)
     dbm.add_to_citation_table(perf_ref, fts=True)
     return jsonify({'record': perf_ref.elements})
 
-@app.route("/performance/<uuid>/add_video_data")
+@app.route("/performance/<uuid>/add_video_data", methods=['POST'])
 def performance_add_data(uuid):
     md5_hash = request.form.get('md5_hash')
     chunk_id = request.form.get('chunk_id')
-    total_chunks = request.form.get('total_chunks')
+    total_chunks = int(request.form.get('total_chunks'))
     chunk_data = request.form.get('chunk_data')
+    chunk_size = int(request.form.get('chunk_size'))
+
+    save_state_b_array = bytearray(base64.b64decode(chunk_data))
+
+    #   The base64 library will interpret trailing zeros as padding and remove them, this adds them back in
+    if len(save_state_b_array) != chunk_size:
+        save_state_b_array.extend([0 for _ in range(len(save_state_b_array), chunk_size)])
 
     #   If there isn't a temp directory for this hash, create one
     temp_path = os.path.join(LOCAL_DATA_ROOT, "tmp_{}".format(md5_hash))
@@ -314,8 +330,8 @@ def performance_add_data(uuid):
         os.makedirs(temp_path)
 
     #   Write the chunk of data to a temp file
-    with open("{}_of_{}".format(chunk_id, total_chunks), "wb") as temp:
-        temp.write(chunk_data)
+    with open("{}/{}_of_{}".format(temp_path, (int(chunk_id) + 1), total_chunks), "wb") as temp:
+        temp.write(save_state_b_array)
 
     chunk_paths = [chunk for chunk in fnmatch.filter(os.listdir(temp_path), "*_of_*")]
 
@@ -325,14 +341,15 @@ def performance_add_data(uuid):
         final_file = open(final_path, "ab")
 
         for cp in sorted(chunk_paths, key=lambda p: int(p.split("_")[0])):
-            with open(cp, "rb") as cf:
+            with open("{}/{}".format(temp_path, cp), "rb") as cf:
                 final_file.write(cf.read())
 
+        final_file.close()
         final_hash = save_file_to_store(final_path)
         shutil.rmtree(temp_path)
 
         #   Attach data to performance record
-        dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE,['replay_source_file'], [final_hash], ["uuid"], [uuid])
+        dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE,['replay_source_file_ref'], [final_hash], ["uuid"], [uuid])
     return "OK"
 
 

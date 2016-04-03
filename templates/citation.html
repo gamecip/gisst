@@ -8,7 +8,7 @@
     <link href="/static/css/citetool_editor.css" rel="stylesheet" type="text/css">
     <script src="/static/js/jquery-2.1.4.min.js"></script>
     <!-- <script src="/static/js/gif-maker.js"></script> -->
-    <script src="/static/js/citestate.js"></script>
+    <script src="/static/js/cite-game/citestate.js"></script>
 
     {% if citeref['source_data'] or main_executable %}
     <script>
@@ -33,6 +33,9 @@
 <body>
     <div id="citationTableHolder">
         <h1>{{ citeref['title'] }}</h1>
+        {% if citeref['source_data'] or extra_files %}
+        <a href="/play/{{ citeref['uuid'] }}">Click to Analyze!</a>
+        {% endif %}
         <h2>Citation Information</h2>
         <table>
             {% for k, v in citeref.elements.items() %}
