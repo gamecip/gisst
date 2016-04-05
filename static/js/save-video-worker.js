@@ -8,12 +8,12 @@ importScripts('sha1.js');
 
 function addPerformanceVideoURL(perfUUID){ return "/performance/" + perfUUID + '/add_video_data'}
 
-function asyncSaveVideoFile(perfUUID, targetURL, data, callback){
+function asyncSaveVideoFile(targetURL, data, callback){
     var tasks = [];
     var chunkIndex = 0;
     var chunkSize = 1048576;
     var totalBytesSent = 0;
-    var md5 = SHA1Generator.calcSHA1FromByte(data.buffer);
+    var sha1 = SHA1Generator.calcSHA1FromByte(data.buffer);
 
     self.totalChunks = Math.ceil(data.buffer.length / chunkSize);
 
@@ -29,7 +29,7 @@ function asyncSaveVideoFile(perfUUID, targetURL, data, callback){
         }
 
         var chunkData = new Uint8Array(data.buffer, chunkIndex * chunkSize, adjustedChunkSize);
-        tasks.push(createSaveFileChunkTask(targetURL, md5, chunkIndex, chunkData, self.totalChunks));
+        tasks.push(createSaveFileChunkTask(targetURL, sha1, chunkIndex, chunkData, self.totalChunks));
         totalBytesSent += chunkSize;
         chunkIndex++;
     }
@@ -39,42 +39,46 @@ function asyncSaveVideoFile(perfUUID, targetURL, data, callback){
     })
 }
 
-function createSaveFileChunkTask(targetURL, md5Hash, chunkId, chunkData, totalChunks){
+function createSaveFileChunkTask(targetURL, sha1Hash, chunkId, chunkData, totalChunks){
     return function(cb){
         var xhr = new XMLHttpRequest();
-        var params = "total_chunks=" + totalChunks +
-                "&chunk_id=" + chunkId +
-                "&chunk_data=" + StringView.bytesToBase64(chunkData) +
-                "&md5_hash=" + md5Hash +
-                "&chunk_size=" + chunkData.length;
+        var fdata = new FormData();
+        fdata.append('total_chunks', '' + totalChunks);
+        fdata.append('chunk_id', '' + chunkId);
+        fdata.append('chunk_data', StringView.bytesToBase64(chunkData));
+        fdata.append('sha1_hash', sha1Hash);
+        fdata.append('chunk_size', chunkData.length);
         xhr.open("POST", targetURL, true);
         xhr.onload = function(e){
             self.chunksSent++;
             // PROGRESS Message
             self.postMessage({type: 'progress',
                 chunkId: chunkId,
-                totalChunks: totalChunks,
-                percent: self.chunksSent / self.totalChunks});
+                totalChunks: self.totalChunks,
+                percent: self.chunksSent / self.totalChunks,
+                uuid: self.perfUUID
+            });
             cb(null, xhr.response)
         };
-        xhr.send(params);
+        xhr.send(fdata);
     }
 }
 
-var totalChunks;
-var chunksSent = 0;
+self.chunksSent = 0;
 
 onmessage = function(e){
-    var performanceUUID = e.data.performanceUUID;
-    var targetURL = addPerformanceVideoURL(performanceUUID);
+    self.perfUUID = e.data.perfUUID;
+    var targetURL = addPerformanceVideoURL(self.perfUUID);
+    
+    self.postMessage({type: "dataCheck", data: e.data});
 
-    asyncSaveVideoFile(performanceUUID, targetURL, e.data, function(err, results){
+    asyncSaveVideoFile(targetURL, e.data.data, function(err, results){
         if(err){
             // ERROR Message
-            self.postMessage({type: 'error', message: err})
+            self.postMessage({type: 'error', uuid: self.perfUUID, message: err})
         }else{
             // FINISHED Message
-            self.postMessage({type: 'finished'})
+            self.postMessage({type: 'finished', uuid: self.perfUUID})
         }
     })
 };

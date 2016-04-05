@@ -8,6 +8,7 @@ import base64
 import datetime
 import fnmatch
 import shutil
+import hashlib
 from collections import OrderedDict
 from flask import Flask, Blueprint, redirect, request, url_for, Response
 from flask import render_template, send_file, jsonify
@@ -312,7 +313,7 @@ def performance_add(uuid):
 
 @app.route("/performance/<uuid>/add_video_data", methods=['POST'])
 def performance_add_data(uuid):
-    md5_hash = request.form.get('md5_hash')
+    sha1_hash = request.form.get('sha1_hash')
     chunk_id = request.form.get('chunk_id')
     total_chunks = int(request.form.get('total_chunks'))
     chunk_data = request.form.get('chunk_data')
@@ -325,7 +326,7 @@ def performance_add_data(uuid):
         save_state_b_array.extend([0 for _ in range(len(save_state_b_array), chunk_size)])
 
     #   If there isn't a temp directory for this hash, create one
-    temp_path = os.path.join(LOCAL_DATA_ROOT, "tmp_{}".format(md5_hash))
+    temp_path = os.path.join(LOCAL_DATA_ROOT, "tmp_{}".format(sha1_hash))
     if not os.path.exists(temp_path):
         os.makedirs(temp_path)
 
@@ -337,7 +338,7 @@ def performance_add_data(uuid):
 
     #   See if all the chunks are written, if so concatenate into final file and add that to storage
     if total_chunks == len(chunk_paths):
-        final_path = os.path.join(temp_path, "final_{}.mp4".format(md5_hash))
+        final_path = os.path.join(temp_path, "final_{}.mp4".format(sha1_hash))
         final_file = open(final_path, "ab")
 
         for cp in sorted(chunk_paths, key=lambda p: int(p.split("_")[0])):

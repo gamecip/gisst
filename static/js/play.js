@@ -302,7 +302,7 @@ $(function() {
 
             if(context.currentPerformance){
                 record.performance_uuid = context.currentPerformance.record.uuid;
-                if(context.isRecording) record.performance_time_index = Date.now() - context.startedRecordingTime;
+                if(context.emu.recording) record.performance_time_index = Date.now() - context.startedRecordingTime;
                 //  Check to see if this is a state save terminal
                 if(context.hasFinishedRecording){
                     record.performance_time_index = Date.now() - context.previousStartedRecordingTime;
@@ -389,7 +389,7 @@ $(function() {
 
     function enableStopRecordPerformance(context){
         context.ui.stopRecordingButton.click(function(e){
-            if(context.isRecording){
+            if(context.emu.recording){
                 var tasks = [
                     async.apply(asyncStopRecording, context),
                     function(context, data, callback){
@@ -512,6 +512,7 @@ $(function() {
     }
 
     function loadStateFromCache(context, cache, callback){
+
             asyncLoadState(context, cache.info, cache.data, callback);
     }
 
@@ -529,7 +530,7 @@ $(function() {
 
     function createPerformanceSaveTask(context, perfInfo, perfData){
         perfInfo.title = context.ui.performanceTitle.val();
-        return {context: context, info: perfInfo, data: perfData}
+        return {context: context, info: perfInfo, data: perfData, uuid: perfInfo.record.uuid}
     }
 
     //Manage the compression and uploading of save state data
@@ -556,10 +557,30 @@ $(function() {
     }
 
     function processPerformanceDataSave(task, callback){
-        asyncSaveVideoFile(task.context, task.data, function(err, results){
-            asyncGetPerformanceInfo(task.context, task.info, function(err, c, i){
-                callback(c, i);
-            });
+        var saveWorker = new Worker("/static/js/save-video-worker.js");
+        saveWorker.onmessage = function(e){
+            var data = e.data;
+            if(data.type === "progress"){
+                console.log("Performance: " + data.uuid + " video save is " + data.percent + "% complete.")
+            }else if(data.type === "error"){
+                console.log("Error with performance " + data.uuid + " " + data.message);
+            }else if(data.type === "finished"){
+                console.log("Performance: " + data.uuid + " video save is complete.");
+
+                if(callback){
+                    asyncGetPerformanceInfo(task.context, task.info, function(err, c, i){
+                        callback(c, i)
+                    });
+                }
+                saveWorker.terminate();
+            }else if(data.type === "stdout"){
+                console.log(data.data);
+            }
+        };
+
+        saveWorker.postMessage({
+            perfUUID: task.uuid,
+            data: task.data
         });
     }
 
@@ -573,52 +594,6 @@ $(function() {
             data.buffer = tempArray;
             callback(null, context, i, data)
         })
-    }
-
-    function asyncSaveVideoFile(context, data, callback){
-        var tasks = [];
-        var chunkIndex = 0;
-        var chunkSize = 1048576;
-        var totalBytesSent = 0;
-        var md5 = SHA1Generator.calcSHA1FromByte(data.buffer);
-        var perfUUID = context.currentPerformance.record.uuid;
-        var targetURL = addPerformanceVideoURL(perfUUID);
-
-        while(totalBytesSent < data.buffer.length){
-            var adjustedChunkSize;
-            var dataRemaining = data.buffer.length - chunkIndex * chunkSize;
-            if(dataRemaining >= 0 && dataRemaining < chunkSize){
-                adjustedChunkSize = dataRemaining;
-            } else if(dataRemaining < 0){
-                adjustedChunkSize = chunkSize - dataRemaining;
-            } else {
-                adjustedChunkSize = chunkSize;
-            }
-
-            var chunkData = new Uint8Array(data.buffer, chunkIndex * chunkSize, adjustedChunkSize);
-            tasks.push(createSaveFileChunkTask(targetURL, md5, chunkIndex, chunkData, Math.ceil(data.buffer.length / chunkSize)));
-            totalBytesSent += chunkSize;
-            chunkIndex++;
-        }
-
-        async.parallel(tasks, function(err, results){
-            if (err) console.log("Error saving video file for performance: {}".format(perfUUID));
-            callback(err, results)
-        })
-    }
-
-    function createSaveFileChunkTask(targetURL, md5Hash, chunkId, chunkData, totalChunks){
-        return function(cb){
-            var data = {
-                total_chunks: totalChunks,
-                chunk_id: chunkId,
-                chunk_data: StringView.bytesToBase64(chunkData),
-                md5_hash: md5Hash,
-                chunk_size: chunkData.length
-            };
-            $.post(targetURL, data, function(result){ cb(null, result) });
-
-        }
     }
 
     //Wraps saveExtraFiles to capture async err, and pass arguments forward in the chain
