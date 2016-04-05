@@ -46,7 +46,7 @@ $(function() {
                     emu: "",
                     lastState: "",
                     availableStates: [],
-                    statesCache: [],
+                    statesCache: {},
                     currentGame: "",
                     currentPerformance: "",
                     hasRecording: false,
@@ -195,6 +195,19 @@ $(function() {
         }
     }
 
+    function updateCurrentState(context){
+        context.ui.mostRecentState.empty();
+        if(context.lastState){
+            context.ui.mostRecentState.append('<h4>Most Recent Save State</h4>');
+            $('<div/>', {
+                id: context.id + '_mostRecentStateDiv',
+                text: context.lastState.record.description
+            }).attr('data-state-uuid', context.lastState.record.uuid)
+                .appendTo(context.ui.mostRecentState);
+            $('#' + context.id + '_mostRecentStateDiv').click(createLoadableClickHandler(context))
+        }
+    }
+
     function createLoadableClickHandler(context){
         return function(event){
             var uuid = $(this).data('state-uuid');
@@ -222,18 +235,6 @@ $(function() {
         }
     }
 
-    function updateCurrentState(context){
-        context.ui.mostRecentState.empty();
-        if(context.lastState){
-            context.ui.mostRecentState.append('<h4>Most Recent Save State</h4>');
-            $('<div/>', {
-                id: context.id + '_mostRecentStateDiv',
-                text: context.lastState.record.description
-            }).attr('data-state-uuid', context.lastState.record.uuid)
-                .appendTo(context.ui.mostRecentState);
-            $('#' + context.id + '_mostRecentStateDiv').click(createLoadableClickHandler(context))
-        }
-    }
 
 
     //002 Async Function Management
@@ -297,6 +298,11 @@ $(function() {
                 description: context.ui.stateDescription.val(),
                 emulator: context.emu.emulator
             };
+            if(!context.currentGame.isSingleFile){
+                record.emt_stack_pointer = stateData.emtStack;
+                record.stack_pointer = stateData.stack;
+                record.time = stateData.time;
+            }
             //Ick... Should move this somewhere
             context.ui.stateDescription.val("");
 
@@ -314,7 +320,7 @@ $(function() {
                     if(record.performance_time_index) record.description += " at time: " + record.performance_time_index;
                 }
             }
-            addStateRecordAJAX(context, {record: record}, {},
+            addStateRecordAJAX(context, {record: record},
                 function(err, context, info){
                     if(context.currentGame.isSingleFile){
                         context.stateDataSaveQueue.push(createSaveStateDataTask(context,
@@ -328,8 +334,8 @@ $(function() {
                             {
                                 buffer: new Uint8Array(stateData.heap),
                                 compressed: false,
-                                emt_stack_pointer: stateData.emtStack,
-                                stack_pointer: stateData.stack,
+                                emtStack: stateData.emtStack,
+                                stack: stateData.stack,
                                 time: stateData.time
                             },
                             DEPENDENT_STATE
@@ -423,7 +429,7 @@ $(function() {
             function(emu){
                 context.emu = emu;
                 enableAudioToggle(context);
-                if("recorder" in options && "autoStart" in options['recorder'] && options['recorder']){
+                if("recorder" in options && options['recorder'] && "autoStart" in options['recorder']){
                     context.startedRecordingTime = Date.now();
                 }
                 cb(context);
@@ -485,6 +491,7 @@ $(function() {
                 dataToLoad.time = d.time;
                 dataToLoad.emtStack = d.emtStack;
                 dataToLoad.stack = d.stack;
+                console.log("Loading state : " + info.record.description + " from time: " + new Date(d.time).toUTCString())
             }
             //pass dataToLoad with uncompressed buffer to loadState, but pass original data object down the line
             context.emu.loadState(dataToLoad, function(){
@@ -495,25 +502,27 @@ $(function() {
 
     function initLoadState(context, info, callback){
         //check cache
-        for(var i = 0; i < context.statesCache.length; i++){
-            if(context.statesCache[i].info.record.uuid === info.record.uuid){
-                loadStateFromCache(context, context.statesCache[i], callback);
-                return;
+        if(info.record.uuid in context.statesCache && context.statesCache[info.record.uuid]){
+            loadStateFromCache(context, context.statesCache[info.record.uuid], callback);
+        } else {
+            //init async if not found
+            for(var i = 0; i < context.availableStates.length; i++){
+                var state = context.availableStates[i];
+                if(state.uuid === info.record.uuid){ //rely on var scoping to function
+                    break;
+                }
             }
+            loadStateFromServer(createStateLoadTask(context, {record: state}), callback);
         }
-        //init async if not found
-        for(var i = 0; i < context.availableStates.length; i++){
-            var state = context.availableStates[i];
-            if(state.uuid === info.record.uuid){ //rely on var scoping to function
-                break;
-            }
-        }
-        loadStateFromServer(createStateLoadTask(context, {record: state}), callback);
+
     }
 
     function loadStateFromCache(context, cache, callback){
-
-            asyncLoadState(context, cache.info, cache.data, callback);
+        //  Need to refresh state record before loading data from cache
+        //  State's data is constant, but it's record info may change (i.e. be linked to a performance / have more sibling states)
+        asyncGetStateInfo(context, cache.info, function(err, c, info){
+            asyncLoadState(context, info, cache.data, callback);
+        });
     }
 
     //State Save Task Factory Functions (just to make sure task object is consistent)
@@ -655,7 +664,7 @@ $(function() {
                 callback(err, context, info, data);
             },
             function on_progress(percent){
-                console.log('Compressing state data from '+ info.record.description + " " + percent + "% complete");
+                //console.log('Compressing state data from '+ info.record.description + " " + percent + "% complete");
             }
         )
     }
@@ -688,7 +697,7 @@ $(function() {
         }
     }
 
-    function addStateRecordAJAX(context, stateInfo, data, callback){
+    function addStateRecordAJAX(context, stateInfo, callback){
         var dataObject = {};
         //  Copy additional descriptions if needed
         for(var key in stateInfo.record){
@@ -765,10 +774,10 @@ $(function() {
         context.lastState.fileURL = info.stateFileURL;
         context.availableStates = info.availableStates;
 
-        if(context.statesCache.length > STATE_CACHE_LIMIT){
-            context.statesCache.pop();
+        if(!(info.record.uuid in context.statesCache)){
+            context.statesCache[info.record.uuid] = {info: info, data: data};
         }
-        context.statesCache.unshift({info: info, data: data});
+
         updateStateUI(context);
     }
 

@@ -265,9 +265,6 @@ def add_save_state(uuid):
 def add_save_state_data(uuid):
     save_state_data = request.form.get('buffer')
     compressed = True if request.form.get('compressed') == u'true' else False
-    emt_stack_pointer = request.form.get('emt_stack_pointer')
-    stack_pointer = request.form.get('stack_pointer')
-    time = request.form.get('time')
     data_length = int(request.form.get('data_length'))
 
     save_state_b_array = bytearray(base64.b64decode(save_state_data))
@@ -278,8 +275,8 @@ def add_save_state_data(uuid):
 
     source_data_hash, file_name = save_byte_array_to_store(save_state_b_array, file_name=uuid)
     dbm.update_table(dbm.GAME_SAVE_TABLE,
-                     ['save_state_source_data', 'compressed', 'emt_stack_pointer', 'stack_pointer', 'time'],
-                     [source_data_hash, compressed, emt_stack_pointer, stack_pointer, time],
+                     ['save_state_source_data', 'compressed'],
+                     [source_data_hash, compressed],
                      ['uuid'], [uuid])
     return jsonify({'record': dbm.retrieve_save_state(uuid=uuid)[0]})
 
@@ -338,7 +335,8 @@ def performance_add_data(uuid):
 
     #   See if all the chunks are written, if so concatenate into final file and add that to storage
     if total_chunks == len(chunk_paths):
-        final_path = os.path.join(temp_path, "final_{}.mp4".format(sha1_hash))
+        final_name = "final_{}.mp4".format(sha1_hash)
+        final_path = os.path.join(temp_path, final_name)
         final_file = open(final_path, "ab")
 
         for cp in sorted(chunk_paths, key=lambda p: int(p.split("_")[0])):
@@ -350,7 +348,10 @@ def performance_add_data(uuid):
         shutil.rmtree(temp_path)
 
         #   Attach data to performance record
-        dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE,['replay_source_file_ref'], [final_hash], ["uuid"], [uuid])
+        dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE,
+                         ['replay_source_file_ref', 'replay_source_file_name'],
+                         [final_hash, final_name],
+                         ["uuid"], [uuid])
     return "OK"
 
 
