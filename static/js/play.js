@@ -2,6 +2,7 @@
  * Created by erickaltman on 2/29/16.
  */
 
+var contextFactory;
 
 
 $(function() {
@@ -13,6 +14,8 @@ $(function() {
     var DEPENDENT_STATE = "dependentState";
     var LZMA_WORKER_PATH = "/static/js/lzma_worker.js";
     var STATE_CACHE_LIMIT = 10;
+    var LZMA_ENCODED = "lzma";
+    var RL_ENCODED = "rl";
 
     // API Call URLs
 
@@ -30,7 +33,7 @@ $(function() {
     function addPerformanceVideoURL(perfUUID){ return "/performance/" + perfUUID + '/add_video_data'}
 
     //Simple context factory
-    var contextFactory = (function(){
+    contextFactory = (function(){
         var counter = 0;
         var contextHash = {};
         function increaseCount(){
@@ -298,6 +301,9 @@ $(function() {
                 description: context.ui.stateDescription.val(),
                 emulator: context.emu.emulator
             };
+
+            if(!record.description)
+                record.description = "State for " + context.currentGame.record.title + " at " + new Date(Date.now()).toUTCString();
             if(!context.currentGame.isSingleFile){
                 record.emt_stack_pointer = stateData.emtStack;
                 record.stack_pointer = stateData.stack;
@@ -396,6 +402,7 @@ $(function() {
     function enableStopRecordPerformance(context){
         context.ui.stopRecordingButton.click(function(e){
             if(context.emu.recording){
+                console.log("Stop Recording Issued.");
                 var tasks = [
                     async.apply(asyncStopRecording, context),
                     function(context, data, callback){
@@ -491,7 +498,10 @@ $(function() {
                 dataToLoad.time = d.time;
                 dataToLoad.emtStack = d.emtStack;
                 dataToLoad.stack = d.stack;
-                console.log("Loading state : " + info.record.description + " from time: " + new Date(d.time).toUTCString())
+                console.log("Loading state : " + info.record.description + "\nTime: " + new Date(d.time).toUTCString() +
+                        "\nCompressed: " + d.compressed + "\nHeap Size:" + d.buffer.length + "\nStack: " + d.stack +
+                        "\nEmtStack: " + d.emtStack
+                )
             }
             //pass dataToLoad with uncompressed buffer to loadState, but pass original data object down the line
             context.emu.loadState(dataToLoad, function(){
@@ -504,7 +514,7 @@ $(function() {
         //check cache
         if(info.record.uuid in context.statesCache && context.statesCache[info.record.uuid]){
             loadStateFromCache(context, context.statesCache[info.record.uuid], callback);
-        } else {
+        } else { 
             //init async if not found
             for(var i = 0; i < context.availableStates.length; i++){
                 var state = context.availableStates[i];
@@ -514,7 +524,6 @@ $(function() {
             }
             loadStateFromServer(createStateLoadTask(context, {record: state}), callback);
         }
-
     }
 
     function loadStateFromCache(context, cache, callback){
@@ -620,14 +629,27 @@ $(function() {
         for(var file in info.fileMapping){
             var cleanFilePath;
             if(file.match(/^\//)) cleanFilePath = file.slice(1) //if there is a leading slash remove it
+
             var fileObj = {
                 extra_file_data: StringView.bytesToBase64(info.fileMapping[file]),
                 sha1_hash: SHA1Generator.calcSHA1FromByte(info.fileMapping[file]),
                 data_length: info.fileMapping[file].length,
-                rel_file_path: cleanFilePath,
-                is_executable: fileInformation[cleanFilePath].isExecutable,
-                main_executable: fileInformation[cleanFilePath].mainExecutable
+                rel_file_path: cleanFilePath
             };
+            // Make sure it's a known file otherwise make an assumption about executable
+            if(cleanFilePath in fileInformation)
+            {
+                fileObj.is_executable = fileInformation[cleanFilePath].isExecutable;
+                fileObj.main_executable = fileInformation[cleanFilePath].mainExecutable;
+            }else{
+                var ext = cleanFilePath.split(".").pop();
+                if(ext === "EXE" || ext == "exe")
+                {
+                    fileObj.is_executable = true;
+                    fileObj.main_executable = false;
+                }
+            }
+            console.log("Creating file save for: " +cleanFilePath+ " with hash: " + fileObj.sha1_hash);
             tasks.push(createFilePathPostTask(fileObj, info.record.uuid))
         }
 
@@ -660,6 +682,7 @@ $(function() {
                 data.buffer = result;
                 data.data_length = result.length;
                 data.compressed = true;
+                data.encoding = LZMA_ENCODED;
                 lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
                 callback(err, context, info, data);
             },
@@ -671,31 +694,96 @@ $(function() {
 
     function decompressStateByteArray(context, info, data, callback){
         var lzma = new LZMA(LZMA_WORKER_PATH);
-        if(data.compressed){
+        if(data.compressed && data.encoding == LZMA_ENCODED){
             lzma.decompress(data.buffer,
-            function on_finish(result, err){
-                if (err) console.log("Error with decompression of state data for " + info.uuid);
-                var d = {};
-                //Copy keys that we don't care about
-                for(var key in data){
-                    d[key] = data[key];
-                }
-                //Change the ones we do
-                d.buffer = result;
-                d.data_length = result.length;
-                d.compressed = false;
-                lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
-                //Return new data object
-                callback(err, context, info, d)
-            },
-            function on_progress(percent){
-                //TODO: progress update for state load
-            })
+                function on_finish(result, err){
+                    if (err) console.log("Error with decompression of state data for " + info.uuid);
+                    var d = {};
+                    //Copy keys that we don't care about
+                    for(var key in data){
+                        d[key] = data[key];
+                    }
+                    //Change the ones we do
+                    d.buffer = result;
+                    d.data_length = result.length;
+                    d.compressed = false;
+                    d.encoding = "";
+                    lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
+                    //Return new data object
+                    callback(err, context, info, d)
+                },
+                function on_progress(percent){
+                    //TODO: progress update for state load might not be needed
+                })
         }else{
             //Nothing to decompress, so just ignore
             callback(null, context, info, data)
         }
     }
+
+    function runLengthCompressByteArray(context, info, data, callback){
+        if(!data.compressed)
+        {
+            var encoded = runLengthEncode(data.buffer);
+            data.compressed = true;
+            data.encoding = RL_ENCODED;
+            data.encodedObj = encoded;
+            data.buffer = "";
+        }
+        callback(null, context, info, data);
+    }
+
+    function runLengthDecompressByteArray(context, info, data, callback){
+        if(data.compressed && data.encoding == RL_ENCODED)
+        {
+            data.buffer = runLengthDecode(
+                data.encodedObj.runStarts,
+                data.encodedObj.runLengths,
+                data.encodedObj.totalLength
+            );
+            data.compressed = false;
+            data.encoding = "";
+            data.encodedObj = "";
+        }
+        callback(null, context, info, data);
+    }
+
+    function runLengthEncode(buffer){
+        var runStarts = new Uint8Array(buffer.length);
+        var runLengths = new Uint32Array(buffer.length);
+        var curByte = buffer[0];
+        var curRunLength = 0;
+
+        for(var i = 0, len = buffer.length; i < len; i++){
+            if(curByte == buffer[i]){
+                curRunLength++;
+            }else {
+                runStarts.push(curByte);
+                runLengths.push(curRunLength);
+                curByte = buffer[i];
+                curRunLength = 1;
+            }
+        }
+        runStarts.push(curByte);
+        runLengths.push(curRunLength);
+        assert(runStarts.length == runLengths.length);
+        return {starts: runStarts, lengths: runLengths, totalLength: buffer.length}
+    }
+
+    function runLengthDecode(runStarts, runLengths, totalLength){
+        var buffer = new Uint8Array(totalLength);
+        var index = 0;
+        for(var i = 0, len = runStarts.length; i < len; i++){
+            var byte = runStarts[i];
+            for(var j = 0, len1 = runLengths.length; j < len1; j++){
+                buffer[index] = byte;
+                index++;
+            }
+        }
+        assert(index == totalLength);
+        return buffer;
+    }
+
 
     function addStateRecordAJAX(context, stateInfo, callback){
         var dataObject = {};

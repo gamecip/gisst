@@ -70,6 +70,10 @@ class DatabaseManager:
     AND = ' and '
     OR = ' or '
 
+    #   Encoding
+    LZMA_ENCODED = 'lzma'
+    RL_ENCODED = 'rl'
+
     _constraints = []
 
     fields = {
@@ -125,6 +129,7 @@ class DatabaseManager:
             ('game_uuid',                           'text',                 field_constraint),
             ('save_state_source_data',              'text',                 field_constraint),
             ('compressed',                          'boolean',              field_constraint),
+            ('encoding',                            'text',                 field_constraint),
             ('save_state_type',                     'text',                 field_constraint), #  Values are 'battery', or 'state', may make ENUM later
             ('emulator_name',                       'text',                 field_constraint),
             ('emulator_version',                    'text',                 field_constraint),

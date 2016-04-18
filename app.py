@@ -203,6 +203,8 @@ def add_extra_file(uuid):
         extra_b_array.extend([0 for _ in range(len(extra_b_array), data_length)])
 
     hash_check = get_byte_array_hash(extra_b_array)
+    if hash_check != sha1_hash:
+        print "{} hash: {} not equal to client hash: {}".format(file_name, hash_check, sha1_hash)
 
     #   If file with current hash and path already exists, add a new record for save state but
     #   do not create a duplicate file
