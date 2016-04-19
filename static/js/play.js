@@ -14,7 +14,6 @@ $(function() {
     var DEPENDENT_STATE = "dependentState";
     var LZMA_WORKER_PATH = "/static/js/lzma_worker.js";
     var STATE_CACHE_LIMIT = 10;
-    var LZMA_ENCODED = "lzma";
     var RL_ENCODED = "rl";
 
     // API Call URLs
@@ -27,6 +26,7 @@ $(function() {
     //Record Creation
     function addStateRecordURL(gameUUID){ return "/state/" + gameUUID + '/add' }
     function addStateDataURL(stateUUID){ return "/state/" + stateUUID + '/add_data' }
+    function addRLStateDataURL(stateUUID){ return "/state/" + stateUUID + '/add_rl_data'}
     function addExtraFileRecordURL(stateUUID){ return "/extra_file/" + stateUUID + '/add'}
     function addPerformanceRecordURL(gameUUID){ return "/performance/" + gameUUID + '/add'}
     function updatePerformanceRecordURL(perfUUID){ return "/performance/" + perfUUID + '/update'}
@@ -256,19 +256,56 @@ $(function() {
                 data.emtStack = info.record.emt_stack_pointer;
                 data.stack = info.record.stack_pointer;
                 data.time = info.record.time;
+                data.compressed = info.record.compressed;
             }
             asyncLoadState(context, info, data, callback);
         })
     }
 
     function asyncLoadStateArray(context, info, callback){
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', info.stateFileURL, true);
-        xhr.responseType = 'arraybuffer';
-        xhr.onload = function (e){
+        var filesAcquired = 0;
+        var filesRequired = 0;
+        var rlStarts, rlLengths;
+        var xhr_single_data = new XMLHttpRequest();
+        var xhr_rl_start_data = new XMLHttpRequest();
+        var xhr_rl_length_data = new XMLHttpRequest();
+
+        function singleOnload(e){
             callback(null, context, info, {buffer: new Uint8Array(this.response), compressed: info.record.compressed})
-        };
-        xhr.send()
+        }
+
+        function rlStartOnload(e){
+            filesAcquired++;
+            rlStarts = new Uint8Array(this.response);
+            if(filesRequired == filesAcquired){
+                callback(null, context, info, {encodedObj: {starts: rlStarts, lengths: rlLengths, totalLength: info.record.rl_total_length}})
+            }
+        }
+
+        function rlLengthOnload(e){
+            filesAcquired++;
+            rlLengths = new Uint8Array(this.response);
+            if(filesRequired == filesAcquired){
+                callback(null, context, info, {encodedObj: {starts: rlStarts, lengths: rlLengths, totalLength: info.record.rl_total_length}})
+            }
+        }
+
+        if('stateFileURL' in info){
+            xhr_single_data.open('GET', info.stateFileURL, true);
+            xhr_single_data.responseType = 'arraybuffer';
+            xhr_single_data.onload = singleOnload;
+            xhr_single_data.send();
+        }else if('rlStartsURL' in info && 'rlLengthsURL' in info){
+            filesRequired = 2;
+            xhr_rl_start_data.open('GET', info.rlStartsURL, true);
+            xhr_rl_length_data.open('GET', info.rlLengthsURL, true);
+            xhr_rl_start_data.responseType = 'arraybuffer';
+            xhr_rl_length_data.responseType = 'arraybuffer';
+            xhr_rl_start_data.onload = rlStartOnload;
+            xhr_rl_length_data.onload = rlLengthOnload;
+            xhr_rl_start_data.send();
+            xhr_rl_length_data.send();
+        }
     }
 
     function enableStartEmulation(context){
@@ -489,7 +526,8 @@ $(function() {
         // Decompress data if needed, otherwise just pass as is (decompress function will ignore uncompressed data)
         // Do not modify the data object directly, as it will get passed along to the cache
         // and we don't want uncompressed data in the cache since that might blow up the browser
-        decompressStateByteArray(context, info, data, function(err, c, i, d){
+        //TODO: Clean this up if runLength actually works
+        function prepLoadState(err, c, i, d){
             var dataToLoad = {};
             if(context.currentGame.isSingleFile){
                 dataToLoad = d.buffer;
@@ -499,15 +537,22 @@ $(function() {
                 dataToLoad.emtStack = d.emtStack;
                 dataToLoad.stack = d.stack;
                 console.log("Loading state : " + info.record.description + "\nTime: " + new Date(d.time).toUTCString() +
-                        "\nCompressed: " + d.compressed + "\nHeap Size:" + d.buffer.length + "\nStack: " + d.stack +
-                        "\nEmtStack: " + d.emtStack
+                    "\nCompressed: " + d.compressed + "\nHeap Size:" + d.buffer.length + "\nStack: " + d.stack +
+                    "\nEmtStack: " + d.emtStack
                 )
             }
             //pass dataToLoad with uncompressed buffer to loadState, but pass original data object down the line
             context.emu.loadState(dataToLoad, function(){
                 callback(context, info, data)
             })
-        })
+        }
+        // If run length encoded handle that
+        // else just do a normal decode
+        if('encodedObj' in data && data.encodedObj){
+            runLengthDecompressByteArray(context, info, data, prepLoadState);
+        }else{
+            decompressStateByteArray(context, info, data, prepLoadState);
+        }
     }
 
     function initLoadState(context, info, callback){
@@ -560,8 +605,8 @@ $(function() {
             ];
         }else if(task.type === DEPENDENT_STATE){
             tasks = [
-                async.apply(compressStateByteArray, task.context, task.info, task.data),
-                asyncSaveStateData,
+                async.apply(runLengthCompressByteArray, task.context, task.info, task.data),
+                asyncSaveStateRunLengthData,
                 asyncSaveExtraFiles,
                 asyncFileSaveTasks
             ];
@@ -612,6 +657,20 @@ $(function() {
             data.buffer = tempArray;
             callback(null, context, i, data)
         })
+    }
+
+    function asyncSaveStateRunLengthData(context, info, data, callback){
+        var dataObj = {
+            rl_starts: StringView.bytesToBase64(data.encodedObj.starts),
+            rl_lengths: StringView.bytesToBase64(data.encodedObj.lengths),
+            rl_starts_length: data.encodedObj.starts.length,
+            rl_lengths_length: data.encodedObj.lengths.length,
+            rl_total_length: data.encodedObj.totalLength
+        };
+        $.post(addRLStateDataURL(info.record.uuid), dataObj, function(i){
+            callback(null, context, i, data);
+        })
+
     }
 
     //Wraps saveExtraFiles to capture async err, and pass arguments forward in the chain
@@ -682,7 +741,6 @@ $(function() {
                 data.buffer = result;
                 data.data_length = result.length;
                 data.compressed = true;
-                data.encoding = LZMA_ENCODED;
                 lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
                 callback(err, context, info, data);
             },
@@ -692,9 +750,19 @@ $(function() {
         )
     }
 
+    function singleCompressByteArray(buffer, callback){
+        var lzma = new LZMA(LZMA_WORKER_PATH);
+        lzma.compress(buffer, 1, function(r, e){ lzma.worker().terminate(); callback(e, r)})
+    }
+
+    function singleDecompressByteArray(buffer, callback){
+        var lzma = new LZMA(LZMA_WORKER_PATH);
+        lzma.decompress(buffer, function(r, e){ lzma.worker().terminate(); callback(e, r)})
+    }
+
     function decompressStateByteArray(context, info, data, callback){
         var lzma = new LZMA(LZMA_WORKER_PATH);
-        if(data.compressed && data.encoding == LZMA_ENCODED){
+        if(data.compressed){
             lzma.decompress(data.buffer,
                 function on_finish(result, err){
                     if (err) console.log("Error with decompression of state data for " + info.uuid);
@@ -722,30 +790,48 @@ $(function() {
     }
 
     function runLengthCompressByteArray(context, info, data, callback){
+        var tasks;
         if(!data.compressed)
         {
             var encoded = runLengthEncode(data.buffer);
-            data.compressed = true;
-            data.encoding = RL_ENCODED;
-            data.encodedObj = encoded;
-            data.buffer = "";
+            tasks = [
+                async.apply(singleCompressByteArray, encoded.starts),
+                async.apply(singleCompressByteArray, encoded.lengths)
+            ];
         }
-        callback(null, context, info, data);
+
+        async.parallel(tasks, function(err, results){
+            if(tasks){
+                data.encodedObj = {
+                    starts: results[0],
+                    lengths: results[1],
+                    totalLength: encoded.totalLength
+                };
+                data.compressed = true;
+            }
+            callback(null, context, info, data);
+        });
+
     }
 
     function runLengthDecompressByteArray(context, info, data, callback){
-        if(data.compressed && data.encoding == RL_ENCODED)
+        var tasks;
+        if(data.compressed)
         {
-            data.buffer = runLengthDecode(
-                data.encodedObj.runStarts,
-                data.encodedObj.runLengths,
-                data.encodedObj.totalLength
-            );
-            data.compressed = false;
-            data.encoding = "";
-            data.encodedObj = "";
+            tasks = [
+                async.apply(singleDecompressByteArray, data.encodedObj.starts),
+                async.apply(singleDecompressByteArray, data.encodedObj.lengths)
+            ];
         }
-        callback(null, context, info, data);
+        async.parallel(tasks, function(err, results){
+            if(tasks){
+                data.buffer = runLengthDecode(results[0], results[1], data.encodedObj.totalLength);
+                data.compressed = false;
+                data.encoding = "";
+                data.encodedObj = "";
+            }
+            callback(null, context, info, data);
+        });
     }
 
     function runLengthEncode(buffer){
@@ -753,34 +839,44 @@ $(function() {
         var runLengths = new Uint32Array(buffer.length);
         var curByte = buffer[0];
         var curRunLength = 0;
+        var runStartsIndex = 0;
+        var runLengthsIndex = 0;
 
         for(var i = 0, len = buffer.length; i < len; i++){
             if(curByte == buffer[i]){
                 curRunLength++;
             }else {
-                runStarts.push(curByte);
-                runLengths.push(curRunLength);
+                runStarts[runStartsIndex] = curByte;
+                runLengths[runLengthsIndex] = curRunLength;
                 curByte = buffer[i];
                 curRunLength = 1;
+                runStartsIndex++;
+                runLengthsIndex++;
             }
         }
-        runStarts.push(curByte);
-        runLengths.push(curRunLength);
-        assert(runStarts.length == runLengths.length);
-        return {starts: runStarts, lengths: runLengths, totalLength: buffer.length}
+        // Store last values
+        runStarts[runStartsIndex] = curByte;
+        runLengths[runLengthsIndex] = curRunLength;
+        if(runStartsIndex != runLengthsIndex) throw Error('Run length encode error, RS: '+runStartsIndex+' not equal to RL: '+runLengthsIndex);
+        // Shorten arrays if possible
+        if(runStartsIndex < buffer.length)
+            runStarts = runStarts.slice(0, runStartsIndex + 1);
+            runLengths = runLengths.slice(0, runLengthsIndex + 1);
+        return {starts: runStarts, lengths: new Uint8Array(runLengths.buffer), totalLength: buffer.length}
     }
 
     function runLengthDecode(runStarts, runLengths, totalLength){
         var buffer = new Uint8Array(totalLength);
+        var rl = new Uint32Array(runLengths.buffer);
         var index = 0;
         for(var i = 0, len = runStarts.length; i < len; i++){
             var byte = runStarts[i];
-            for(var j = 0, len1 = runLengths.length; j < len1; j++){
+            for(var j = 0, len1 = rl[i]; j < len1; j++){
                 buffer[index] = byte;
                 index++;
             }
         }
-        assert(index == totalLength);
+        if(index != totalLength) throw Error("Run Length Decode Error, i: "+index+" not equal to tl: "+totalLength);
         return buffer;
     }
 

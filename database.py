@@ -70,10 +70,6 @@ class DatabaseManager:
     AND = ' and '
     OR = ' or '
 
-    #   Encoding
-    LZMA_ENCODED = 'lzma'
-    RL_ENCODED = 'rl'
-
     _constraints = []
 
     fields = {
@@ -129,7 +125,9 @@ class DatabaseManager:
             ('game_uuid',                           'text',                 field_constraint),
             ('save_state_source_data',              'text',                 field_constraint),
             ('compressed',                          'boolean',              field_constraint),
-            ('encoding',                            'text',                 field_constraint),
+            ('rl_starts_data',                      'text',                 field_constraint),
+            ('rl_lengths_data',                     'text',                 field_constraint),
+            ('rl_total_length',                     'integer',              field_constraint),
             ('save_state_type',                     'text',                 field_constraint), #  Values are 'battery', or 'state', may make ENUM later
             ('emulator_name',                       'text',                 field_constraint),
             ('emulator_version',                    'text',                 field_constraint),
@@ -353,6 +351,9 @@ class DatabaseManager:
         values.append(fields.get('description'))
         values.append(fields.get('game_uuid'))
         values.append(fields.get('save_state_source_data'))
+        values.append(fields.get('rl_starts_data'))
+        values.append(fields.get('rl_lengths_data'))
+        values.append(fields.get('rl_total_length'))
         values.append(fields.get('compressed'))
         values.append(fields.get('save_state_type'))
         values.append(fields.get('emulator_name'))

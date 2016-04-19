@@ -122,9 +122,15 @@ def emulation_info_state(uuid):
     state_info['fileMapping'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
                                                                                       state_extra_files)} if state_extra_files else None
     state_info['fileInformation'] = {f['file_path']: f for f in state_extra_files}
-    state_info['stateFileURL'] = os.path.join('/cite_data',
-                                            state_ref['save_state_source_data'],
-                                            '{}'.format(state_ref['uuid']))
+    #   Save data is singular, and probably LZMA compressed
+    if state_ref['save_state_source_data']:
+        state_info['stateFileURL'] = os.path.join('/cite_data', state_ref['save_state_source_data'], '{}'.format(state_ref['uuid']))
+
+    #   Save data is multiple and probably run length encoded
+    if state_ref['rl_starts_data'] and state_ref['rl_lengths_data']:
+        state_info['rlStartsURL'] = os.path.join('/cite_data', state_ref['rl_starts_data'], '{}'.format(state_ref['uuid']))
+        state_info['rlLengthsURL'] = os.path.join('/cite_data', state_ref['rl_lengths_data'], '{}'.format(state_ref['uuid']))
+
     if state_extra_files:
         main_exec = dbm.retrieve_file_path(save_state_uuid=uuid, main_executable=True)[0]
         state_info['gameFileURL'] = os.path.join('/game_data', main_exec['source_data'], main_exec['file_path'].split('/')[-1])
@@ -151,7 +157,7 @@ def emulation_info_game(uuid):
             game_info['fileInformation'] = {f['file_path']: f for f in game_extra_files}
         game_info['stateFileURL'] = None
         game_info['record'] = game_ref.elements
-        game_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') else False, dbm.retrieve_save_state(game_uuid=uuid))
+        game_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') or s.get('rl_starts_data') else False, dbm.retrieve_save_state(game_uuid=uuid))
     return jsonify(game_info)
 
 @app.route("/json/performance_info/<uuid>")
@@ -169,16 +175,13 @@ def play_page(uuid):
     cite_ref = dbm.retrieve_game_ref(uuid)
     state_dicts = dbm.retrieve_save_state(game_uuid=uuid)
 
-    for state in state_dicts:
-        state['load_path'] = "/cite_data/{}/{}".format(state['save_state_source_data'], state['game_uuid'])
-
     if init_state:
         init_state = dbm.retrieve_save_state(uuid=init_state)[0]
         has_exec = dbm.retrieve_file_path(save_state_uuid=init_state['uuid'], main_executable=True)
     else:
         has_exec = dbm.retrieve_file_path(game_uuid=uuid, save_state_uuid=None, main_executable=True)
 
-    if (cite_ref and (cite_ref['data_image_source'] or has_exec)):
+    if cite_ref and (cite_ref['data_image_source'] or has_exec):
         return render_template('play.html',
                                init_state=init_state,
                                cite_ref=cite_ref,
@@ -280,6 +283,33 @@ def add_save_state_data(uuid):
                      ['save_state_source_data', 'compressed'],
                      [source_data_hash, compressed],
                      ['uuid'], [uuid])
+    return jsonify({'record': dbm.retrieve_save_state(uuid=uuid)[0]})
+
+@app.route("/state/<uuid>/add_rl_data", methods=['POST'])
+def add_rl_save_state_data(uuid):
+    rl_starts_b64 = request.form.get('rl_starts')
+    rl_lengths_b64 = request.form.get('rl_lengths')
+    rl_total_length = int(request.form.get('rl_total_length'))
+    rl_lengths_length = int(request.form.get('rl_lengths_length'))
+    rl_starts_length = int(request.form.get('rl_starts_length'))
+
+    rl_starts_b_array = bytearray(base64.b64decode(rl_starts_b64))
+    rl_lengths_b_array = bytearray(base64.b64decode(rl_lengths_b64))
+
+    if len(rl_starts_b_array) != rl_starts_length:
+        rl_starts_b_array.extend([0 for _ in range(len(rl_starts_b_array), rl_starts_length)])
+
+    if len(rl_lengths_b_array) != rl_lengths_length:
+        rl_lengths_b_array.extend([0 for _ in range(len(rl_lengths_b_array), rl_lengths_length)])
+
+    rl_start_hash, file_name = save_byte_array_to_store(rl_starts_b_array, file_name=uuid)
+    rl_lengths_hash, file_name = save_byte_array_to_store(rl_lengths_b_array, file_name=uuid)
+
+    dbm.update_table(dbm.GAME_SAVE_TABLE,
+                     ['rl_starts_data','rl_lengths_data','rl_total_length','compressed'],
+                     [rl_start_hash, rl_lengths_hash, rl_total_length, True],
+                     ['uuid'], [uuid])
+
     return jsonify({'record': dbm.retrieve_save_state(uuid=uuid)[0]})
 
 
