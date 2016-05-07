@@ -464,7 +464,17 @@ $(function() {
     }
 
     function asyncStartEmulationWithRecording(context, callback){
-        CiteState.cite.apply(this, prepArgsForCiteState(context, callback, {mute:false, recorder: {autoStart: true}}))
+        var options = {mute: false, recorder:{autoStart: true}};
+        //Add callback to start recording once SDL context is loaded
+        //if necessary
+        //TODO: change from isSingleFile to requiresSDL2, since there may be SDL2 applications that are single file
+        if(!context.isSingleFile){
+            triggerOnSDL2Available(context, function (context, timestamp){
+                asyncStartRecording(context, callback);
+            });
+            options.recorder = {};
+        }
+        CiteState.cite.apply(this, prepArgsForCiteState(context, callback, options))
     }
 
     function prepArgsForCiteState(context, cb, options){
@@ -473,9 +483,6 @@ $(function() {
             function(emu){
                 context.emu = emu;
                 enableAudioToggle(context);
-                if("recorder" in options && options['recorder'] && "autoStart" in options['recorder']){
-                    context.startedRecordingTime = Date.now();
-                }
                 cb(context);
             },
             context.currentGame.fileURL,
@@ -982,6 +989,31 @@ $(function() {
         context.currentPerformance.linkedStates = info.linkedStates;
         updatePerformanceUI(context, callback);
     }
+    
+    //SDL2 available check
+    //hack to check when the audio node is ready to record and callback (mostly for autostart recording in DOSBOX)
+    var checkSDL2Req = window.requestAnimationFrame(checkSDL2);
+    var SDL2Callbacks = [];
+
+    function checkSDL2(timestamp){
+        if(window["SDL2"]){
+            window.cancelAnimationFrame(checkSDL2Req);
+            for(var co in SDL2Callbacks){
+                var callbackObj = SDL2Callbacks[co];
+                console.log("Triggering callback for context: "+callbackObj.context.id);
+                callbackObj.context.SDL2Available = true;
+                callbackObj.cb(callbackObj.context, timestamp);
+            }
+            SDL2Callbacks = [];
+        }else{
+            checkSDL2Req = window.requestAnimationFrame(checkSDL2);
+        }
+    }
+
+    function triggerOnSDL2Available(context, cb){
+        SDL2Callbacks.push({context:context, cb:cb})
+    }
+    
 
     //right apply for async partials, taken from:
     //http://aeflash.com/2013-06/async-and-functional-javascript.html
