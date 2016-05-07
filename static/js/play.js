@@ -397,6 +397,7 @@ $(function() {
     function enableStartRecordPerformance(context){
         context.ui.startRecordingButton.html("Start Recording");
         context.ui.startRecordingButton.click(function(e){
+            startTiming('buttonPushInterval');
             var tasks = [];
             if(context.emu){
                 //start recording, save new initial state for performance
@@ -439,7 +440,7 @@ $(function() {
     function enableStopRecordPerformance(context){
         context.ui.stopRecordingButton.click(function(e){
             if(context.emu.recording){
-                console.log("Stop Recording Issued.");
+                stopTiming('buttonPushInterval');
                 var tasks = [
                     async.apply(asyncStopRecording, context),
                     function(context, data, callback){
@@ -465,16 +466,20 @@ $(function() {
 
     function asyncStartEmulationWithRecording(context, callback){
         var options = {mute: false, recorder:{autoStart: true}};
-        //Add callback to start recording once SDL context is loaded
-        //if necessary
         //TODO: change from isSingleFile to requiresSDL2, since there may be SDL2 applications that are single file
-        if(!context.isSingleFile){
+        if(!context.currentGame.isSingleFile){
+            //Add callback to start recording once SDL context is loaded
+            //if necessary
             triggerOnSDL2Available(context, function (context, timestamp){
                 asyncStartRecording(context, callback);
             });
             options.recorder = {};
+            //Initiate emulator setup without recording
+            CiteState.cite.apply(this, prepArgsForCiteState(context, null, options))
+        }else{
+            startTiming('asyncRecording');
+            CiteState.cite.apply(this, prepArgsForCiteState(context, callback, options))
         }
-        CiteState.cite.apply(this, prepArgsForCiteState(context, callback, options))
     }
 
     function prepArgsForCiteState(context, cb, options){
@@ -483,7 +488,8 @@ $(function() {
             function(emu){
                 context.emu = emu;
                 enableAudioToggle(context);
-                cb(context);
+                if(cb)
+                    cb(context);
             },
             context.currentGame.fileURL,
             null, //blank unless saveState
@@ -507,9 +513,10 @@ $(function() {
     function asyncStartRecording(context, callback){
         if(!context.emu.recording){
             context.emu.startRecording(function(){
+                startTiming('asyncRecording');
                 context.startedRecordingTime = Date.now();
                 callback(null, context)
-            })
+            });
         }else{
             callback(new Error("Cannot start recording on context "+context.id+" it is already recording"), context)
         }
@@ -518,12 +525,13 @@ $(function() {
     function asyncStopRecording(context, callback){
         if(context.emu.recording){
             context.emu.finishRecording(function(videoData){
+                stopTiming('asyncRecording');
                 context.previousStartedRecordingTime = context.startedRecordingTime;
                 //  Needed to signal to saveState that it should look for the previous started time
                 context.hasFinishedRecording = true;
                 context.startedRecordingTime = 0;
                 callback(null, context, {buffer: videoData, compressed: false})
-            })
+            });
         }else{
             callback(new Error("Cannot stop recording on context "+context.id+" because it hasn't started"), context, {})
         }
@@ -1025,6 +1033,21 @@ $(function() {
             //call fn with the args in the right order, (this, args...., callback)
             fn.apply(thisArg, args.concat(boundArgs).push(callback))
         }
+    }
+
+    //Debugging Timer For Actions
+
+    var timingHash = {};
+
+    function startTiming(name){
+        timingHash[name] = Date.now();
+        console.log("Started Timing Task: "+name+" at "+timingHash[name])
+    }
+
+    function stopTiming(name){
+        var timeElapsed = Date.now() - timingHash[name];
+        console.log("Task "+name+" completed in " + timeElapsed/1000.0 + " sec");
+        delete timingHash[name];
     }
 
     //003-----------PAGE SPECIFIC------------------------
