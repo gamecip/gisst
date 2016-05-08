@@ -73,7 +73,7 @@ $(function() {
                         performanceTitle: "",
                         performanceDescription: ""
                     },
-                    stateDataSaveQueue: async.queue(processStateDataSave, 2),
+                    stateDataSaveQueue: async.queue(processSaveStateData, 2),
                     performanceDataSaveQueue: async.queue(processPerformanceDataSave, 2)
                 };
                 registerContext(nc.id, nc);
@@ -363,6 +363,11 @@ $(function() {
                     if(record.performance_time_index) record.description += " at time: " + record.performance_time_index;
                 }
             }
+            
+            //stub information is, record, single / not single
+            //saveStateWithWorker(record, isSingle, stateData)
+            
+            
             addStateRecordAJAX(context, {record: record},
                 function(err, context, info){
                     if(context.currentGame.isSingleFile){
@@ -512,11 +517,16 @@ $(function() {
 
     function asyncStartRecording(context, callback){
         if(!context.emu.recording){
+            var options = {};
+            //Used to reduce transcoding time for DOS at the moment
+            if(!context.currentGame.isSingleFile){
+                options = {width: context.emu.canvas.width / 2, height: context.emu.canvas.height / 2};
+            }
             context.emu.startRecording(function(){
                 startTiming('asyncRecording');
                 context.startedRecordingTime = Date.now();
                 callback(null, context)
-            });
+            }, options);
         }else{
             callback(new Error("Cannot start recording on context "+context.id+" it is already recording"), context)
         }
@@ -612,26 +622,55 @@ $(function() {
     }
 
     //Manage the compression and uploading of save state data
-    function processStateDataSave(task, callback){
+    function processSaveStateData(task, callback){
         var tasks;
+        //Single save states do not need worker since low overhead
         if(task.type === SINGULAR_STATE){
-            tasks = [
-                async.apply(asyncSaveStateData,task.context, task.info, task.data)
-            ];
-        }else if(task.type === DEPENDENT_STATE){
-            tasks = [
-                async.apply(runLengthCompressByteArray, task.context, task.info, task.data),
-                asyncSaveStateRunLengthData,
-                asyncSaveExtraFiles,
-                asyncFileSaveTasks
-            ];
-        }
-        async.waterfall(tasks, function(err, context, info, data){
-            if(err) console.log("Error with state save of " + task.info.record.uuid);
-            asyncGetStateInfo(context, info, function(e, c, i){
-                callback(c, i, data);
+            asyncSaveStateData(task.info, task.data, function(err, ti, td){
+                if(err) console.log("Error with state save of " + task.info.record.uuid);
+                asyncGetStateInfo(task.context, task.info, function(e, c, i){
+                    callback(c, i, data);
+                });
             });
-        })
+        }else if(task.type === DEPENDENT_STATE){
+            var saveStateWorker = new Worker("/static/js/save-state-worker.js");
+            saveStateWorker.onmessage = function(e){
+                var data = e.data;
+                if(data.type === "stdout"){
+                    console.log("[SAVE STATE W]: "+e.data.message);
+                }else if(data.type === "error"){
+                    console.log("[SAVE STATE W]: Error with "+data.uuid+" "+data.message);
+                }else if(data.type === "finished"){
+                    saveStateWorker.terminate();
+                    if(callback){
+                        asyncGetStateInfo(task.context, task.info, function(e, c, i){
+                            callback(c, i, data.data);
+                        });
+                    }
+                }
+            };
+            
+            var fi;
+            if(task.context.lastState){
+                fi = task.context.lastState.fileInformation;
+            }else{
+                fi = task.context.currentGame.fileInformation;
+            }
+            task.context.emu.saveExtraFiles(task.context.emu.listExtraFiles(),
+                function(fm){
+                    console.log("CALLING RUN LENGTH COMPRESSION.");
+                    runLengthCompressByteArray(task.data, function(err, d){
+                        console.log("RETURNED FROM RUN LENGTH ENCODING");
+                        saveStateWorker.postMessage({
+                            data: d,
+                            fileMapping: fm,
+                            fileInformation: fi,
+                            uuid: task.info.record.uuid
+                        });
+                    });
+            });
+
+        }
     }
 
     function processPerformanceDataSave(task, callback){
@@ -662,7 +701,7 @@ $(function() {
         });
     }
 
-    function asyncSaveStateData(context, info, data, callback){
+    function asyncSaveStateData(info, data, callback){
         //Convert ByteArray to Base64 for transfer
         var tempArray = data.buffer;
         data.data_length = data.buffer.length;
@@ -670,82 +709,10 @@ $(function() {
         data.buffer = StringView.bytesToBase64(data.buffer);
         $.post(addStateDataURL(info.record.uuid), data, function(i){
             data.buffer = tempArray;
-            callback(null, context, i, data)
+            callback(null, i, data)
         })
     }
 
-    function asyncSaveStateRunLengthData(context, info, data, callback){
-        var dataObj = {
-            rl_starts: StringView.bytesToBase64(data.encodedObj.starts),
-            rl_lengths: StringView.bytesToBase64(data.encodedObj.lengths),
-            rl_starts_length: data.encodedObj.starts.length,
-            rl_lengths_length: data.encodedObj.lengths.length,
-            rl_total_length: data.encodedObj.totalLength
-        };
-        $.post(addRLStateDataURL(info.record.uuid), dataObj, function(i){
-            callback(null, context, i, data);
-        })
-
-    }
-
-    //Wraps saveExtraFiles to capture async err, and pass arguments forward in the chain
-    function asyncSaveExtraFiles(context, info, data, callback){
-        context.emu.saveExtraFiles(context.emu.listExtraFiles(),
-            function(fm) {
-                info.fileMapping = fm;
-                callback(null, context, info, data)})
-    }
-
-    function asyncFileSaveTasks(context, info, data, callback){
-        var tasks = [];
-        var fileInformation = context.lastState ? context.lastState.fileInformation : context.currentGame.fileInformation;
-        // Organize individual POSTs for files
-        for(var file in info.fileMapping){
-            var cleanFilePath;
-            if(file.match(/^\//)) cleanFilePath = file.slice(1) //if there is a leading slash remove it
-
-            var fileObj = {
-                extra_file_data: StringView.bytesToBase64(info.fileMapping[file]),
-                sha1_hash: SHA1Generator.calcSHA1FromByte(info.fileMapping[file]),
-                data_length: info.fileMapping[file].length,
-                rel_file_path: cleanFilePath
-            };
-            // Make sure it's a known file otherwise make an assumption about executable
-            if(cleanFilePath in fileInformation)
-            {
-                fileObj.is_executable = fileInformation[cleanFilePath].isExecutable;
-                fileObj.main_executable = fileInformation[cleanFilePath].mainExecutable;
-            }else{
-                var ext = cleanFilePath.split(".").pop();
-                if(ext === "EXE" || ext == "exe")
-                {
-                    fileObj.is_executable = true;
-                    fileObj.main_executable = false;
-                }
-            }
-            console.log("Creating file save for: " +cleanFilePath+ " with hash: " + fileObj.sha1_hash);
-            tasks.push(createFilePathPostTask(fileObj, info.record.uuid))
-        }
-
-        //Run POSTs in parallel and aggregate results
-        async.series(tasks, function(err, results){
-            if (err) console.log("Error with async file saves for state " + info.record.uuid);
-            for(var i = 0; i < results.length; i++){
-                info.fileInformation = {};
-                info.fileInformation[results[i].file_path] = results[i];
-            }
-            callback(err, context, info, data)
-        });
-    }
-
-    function createFilePathPostTask(fileObject, uuid){
-        return function(cb){
-            $.post(addExtraFileRecordURL(uuid),
-                fileObject,
-                function(result){ cb(null, result) }
-            )
-        }
-    }
 
     function compressStateByteArray(context, info, data, callback){
         var lzma = new LZMA(LZMA_WORKER_PATH);
@@ -766,8 +733,9 @@ $(function() {
     }
 
     function singleCompressByteArray(buffer, callback){
+        console.log("STARTING SINGLE COMPRESSION");
         var lzma = new LZMA(LZMA_WORKER_PATH);
-        lzma.compress(buffer, 1, function(r, e){ lzma.worker().terminate(); callback(e, r)})
+        lzma.compress(buffer, 1, function(r, e){ lzma.worker.terminate(); callback(e, r)});
     }
 
     function singleDecompressByteArray(buffer, callback){
@@ -804,7 +772,8 @@ $(function() {
         }
     }
 
-    function runLengthCompressByteArray(context, info, data, callback){
+    function runLengthCompressByteArray(data, callback){
+        console.log('RUN LENGTH COMPRESSION CALLED.');
         var tasks;
         if(!data.compressed)
         {
@@ -814,8 +783,8 @@ $(function() {
                 async.apply(singleCompressByteArray, encoded.lengths)
             ];
         }
-
         async.parallel(tasks, function(err, results){
+            console.log("FINISHED RUN LENGTH COMPRESSION");
             if(tasks){
                 data.encodedObj = {
                     starts: results[0],
@@ -824,7 +793,7 @@ $(function() {
                 };
                 data.compressed = true;
             }
-            callback(null, context, info, data);
+            callback(null, data);
         });
 
     }

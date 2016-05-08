@@ -34,7 +34,7 @@ function asyncSaveStateRunLengthData(encodedObj, callback){
     fdata.append('rl_lengths', StringView.bytesToBase64(encodedObj.lengths));
     fdata.append('rl_starts_length', encodedObj.starts.length);
     fdata.append('rl_lengths_length', encodedObj.lengths.length);
-    fdata.append('total_length', encodedObj.totalLength);
+    fdata.append('rl_total_length', encodedObj.totalLength);
     
     var xhr = new XMLHttpRequest();
     xhr.open("POST", addRLStateDataURL(uuid), true);

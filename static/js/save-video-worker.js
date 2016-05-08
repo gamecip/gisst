@@ -43,7 +43,7 @@ function createSaveFileChunkTask(targetURL, sha1Hash, chunkId, chunkData, totalC
     return function(cb){
         var xhr = new XMLHttpRequest();
         var fdata = new FormData();
-        fdata.append('total_chunks', '' + totalChunks);
+        fdata.append('total_chunks', '' + totalChunks); //convert to strings
         fdata.append('chunk_id', '' + chunkId);
         fdata.append('chunk_data', StringView.bytesToBase64(chunkData));
         fdata.append('sha1_hash', sha1Hash);
