@@ -16,6 +16,12 @@ $(function() {
     var STATE_CACHE_LIMIT = 10;
     var RL_ENCODED = "rl";
 
+    //Reference Tracking for LZMA Compression
+    // (declaring workers inside local scope can mark them for garbage collection)
+
+    var lzmas = {};
+    var lzmaCount = 0;
+
     // API Call URLs
 
     //JSON Information
@@ -713,29 +719,17 @@ $(function() {
         })
     }
 
-
-    function compressStateByteArray(context, info, data, callback){
-        var lzma = new LZMA(LZMA_WORKER_PATH);
-        lzma.compress(data.buffer,
-            1, //compression level, 1 is faster but bigger
-            function on_finish(result, err){
-                if (err) console.log("Error with compression of state data for " + info.uuid);
-                data.buffer = result;
-                data.data_length = result.length;
-                data.compressed = true;
-                lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
-                callback(err, context, info, data);
-            },
-            function on_progress(percent){
-                //console.log('Compressing state data from '+ info.record.description + " " + percent + "% complete");
-            }
-        )
-    }
-
     function singleCompressByteArray(buffer, callback){
         console.log("STARTING SINGLE COMPRESSION");
-        var lzma = new LZMA(LZMA_WORKER_PATH);
-        lzma.compress(buffer, 1, function(r, e){ lzma.worker.terminate(); callback(e, r)});
+        var lzmasKey = "lzma" + lzmaCount;
+        lzmaCount++; //hopefully this will work, not particularly thread safe, but async js is not really threaded anyway
+        lzmas[lzmasKey] = new LZMA(LZMA_WORKER_PATH);
+        lzmas[lzmasKey].compress(buffer, 1,
+            function(r, e){
+                lzmas[lzmasKey].worker().terminate();
+                delete lzmas[lzmasKey];
+                callback(e, r)},
+            function(per){console.log(per)});
     }
 
     function singleDecompressByteArray(buffer, callback){
@@ -759,7 +753,7 @@ $(function() {
                     d.data_length = result.length;
                     d.compressed = false;
                     d.encoding = "";
-                    lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected
+                    lzma.worker().terminate(); //needed since lzma.js does not check for existing worker, and it is not garbage collected (don't know if still true???)
                     //Return new data object
                     callback(err, context, info, d)
                 },
