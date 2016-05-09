@@ -526,7 +526,7 @@ $(function() {
             var options = {};
             //Used to reduce transcoding time for DOS at the moment
             if(!context.currentGame.isSingleFile){
-                options = {width: context.emu.canvas.width / 2, height: context.emu.canvas.height / 2};
+                options = {width: context.emu.canvas.width, height: context.emu.canvas.height, br: 300000};
             }
             context.emu.startRecording(function(){
                 startTiming('asyncRecording');
@@ -664,9 +664,7 @@ $(function() {
             }
             task.context.emu.saveExtraFiles(task.context.emu.listExtraFiles(),
                 function(fm){
-                    console.log("CALLING RUN LENGTH COMPRESSION.");
                     runLengthCompressByteArray(task.data, function(err, d){
-                        console.log("RETURNED FROM RUN LENGTH ENCODING");
                         saveStateWorker.postMessage({
                             data: d,
                             fileMapping: fm,
@@ -728,8 +726,8 @@ $(function() {
             function(r, e){
                 lzmas[lzmasKey].worker().terminate();
                 delete lzmas[lzmasKey];
-                callback(e, r)},
-            function(per){console.log(per)});
+                callback(e, r)});
+            //function(per){console.log(per)}); turn on if there's any issue with compression
     }
 
     function singleDecompressByteArray(buffer, callback){
@@ -767,7 +765,6 @@ $(function() {
     }
 
     function runLengthCompressByteArray(data, callback){
-        console.log('RUN LENGTH COMPRESSION CALLED.');
         var tasks;
         if(!data.compressed)
         {
@@ -778,7 +775,6 @@ $(function() {
             ];
         }
         async.parallel(tasks, function(err, results){
-            console.log("FINISHED RUN LENGTH COMPRESSION");
             if(tasks){
                 data.encodedObj = {
                     starts: results[0],
