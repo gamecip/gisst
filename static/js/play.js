@@ -106,7 +106,7 @@ $(function() {
 
         //Emulation Container
         context.ui.emulationContainer = createElementForContext(context, "div", "emulationContainer", "", $contextRoot);
-        context.ui.emulationContainer.css({ "height": "480px", width: "512px"});
+        context.ui.emulationContainer.css({ "height": "400px", width: "640px"});
 
         //Emulation Controls
         $emulationControls = createElementForContext(context, "div", "emulationControls", "", $contextRoot);
@@ -463,8 +463,9 @@ $(function() {
                         callback(null, context);
                     }
                 ];
+
+                initSaveState(context, updateState);
                 async.waterfall(tasks, function(err, context){
-                    initSaveState(context, updateState);
                     updateFullContext(context);
                 })
             }
@@ -1043,3 +1044,14 @@ $(function() {
     createUIForContext(context0);
     initPageLoad(context0);
 });
+
+
+function pixelValue(x, y, w, h, imgData){
+    var r,g,b,a;
+    var idx = (x << 2) + (y << 2) * w;
+    r = imgData[idx];
+    g = imgData[idx + 1];
+    b = imgData[idx + 2];
+    a = imgData[idx + 3];
+    console.log("Value at ("+x+", "+y+") is: "+r+" "+g+" "+b+" "+a);
+}

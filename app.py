@@ -118,7 +118,7 @@ def emulation_info_state(uuid):
     other_save_states = dbm.retrieve_save_state(game_uuid=state_ref['game_uuid'])
     state_extra_files = dbm.retrieve_file_path(save_state_uuid=uuid)
     state_info['record'] = state_ref
-    state_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') else False, other_save_states)
+    state_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') or s.get('rl_starts_data') else False, other_save_states)
     state_info['fileMapping'] = {k: os.path.join('/game_data', v, k.split('/')[-1]) for k, v in map(lambda x: (x['file_path'], x['source_data']),
                                                                                       state_extra_files)} if state_extra_files else None
     state_info['fileInformation'] = {f['file_path']: f for f in state_extra_files}
