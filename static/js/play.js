@@ -256,6 +256,10 @@ $(function() {
         ], callback);
     }
 
+    function asyncPreLoadStateFromServer(context, info, callback){
+        preLoadStateFromServer(createStateLoadTask(context, info), callback)
+    }
+
     function loadStateFromServer(task, callback){
         preLoadStateFromServer(task, function(err, context, info, data){
             if(!task.context.currentGame.isSingleFile){
@@ -266,6 +270,36 @@ $(function() {
             }
             asyncLoadState(context, info, data, callback);
         })
+    }
+
+    //Needed to separate state data load from emulator load
+    function loadStateForPageLoad(context, info, data, callback){
+
+        function prepForStartEmulation(err, c, i, d){
+            //Need new dataObject so that cache is correct
+            var dataToLoad = {};
+            if(!c.currentGame.isSingleFile){
+                dataToLoad.heap = d.buffer;
+                dataToLoad.emtStack = d.emtStack = info.record.emt_stack_pointer;
+                dataToLoad.time = d.time = info.record.time;
+                dataToLoad.stack = d.stack = info.record.stack_pointer;
+            }else{
+                dataToLoad = d.buffer;
+            }
+            //add compressed data to cache
+            updateState(c, i, d);
+            //overwrite lastState data with uncompressed data (will get replaced with cached data on next load)
+            c.lastState.data = dataToLoad;
+            callback(null, c);
+        }
+
+        data.compressed = info.record.compressed;
+
+        if('encodedObj' in data){
+            runLengthDecompressByteArray(context, info, data, prepForStartEmulation)
+        }else{
+            decompressStateByteArray(context, info, data, prepForStartEmulation)
+        }
     }
 
     function asyncLoadStateArray(context, info, callback){
@@ -504,17 +538,23 @@ $(function() {
                     cb(context);
             },
             context.currentGame.fileURL,
-            null, //blank unless saveState
+            null, //blank unless saveStateURL, used for NES / SNES and other systems with small save states
+            null, //blank unless compressedSaveStateData, used for DOS and other large save states
             null  //blank unless dependent files
             //options are next argument if needed
         ];
+        var single = context.currentGame.isSingleFile;
         if(context.lastState){
-            args[3] = context.lastState.data.buffer;
-            if(!$.isEmptyObject(context.lastState.fileMapping)){
-                args[4] = context.lastState.fileMapping;
+            if(single){
+                args[3] = context.lastState.data;
+            }else{
+                args[4] = context.lastState.data;
+                if(!$.isEmptyObject(context.lastState.fileMapping)){
+                    args[5] = context.lastState.fileMapping;
+                }
             }
         }else if(!$.isEmptyObject(context.currentGame.fileMapping)){
-            args[4] = context.currentGame.fileMapping;
+            args[5] = context.currentGame.fileMapping;
         }
         if(options){
             args.push(options)
@@ -636,7 +676,7 @@ $(function() {
             asyncSaveStateData(task.info, task.data, function(err, ti, td){
                 if(err) console.log("Error with state save of " + task.info.record.uuid);
                 asyncGetStateInfo(task.context, task.info, function(e, c, i){
-                    callback(c, i, data);
+                    callback(c, i, td);
                 });
             });
         }else if(task.type === DEPENDENT_STATE){
@@ -1013,26 +1053,29 @@ $(function() {
     //003-----------PAGE SPECIFIC------------------------
 
     function initPageLoad(context){
-        var loadTasks = [
-            async.apply(asyncGetGameInfo, context, {record: {uuid: gameUUID}})
-        ];
-
-        if(stateUUID){
-            loadTasks.push(async.apply(preLoadStateFromServer,
-                context, createStateLoadTask(context, {record: {uuid: stateUUID}})))
-        }
-
-        async.series(loadTasks, function(err, results){
-            if(err) console.log("Error loading game " + gameUUID);
-            //result[0][0] == context, result[0][1] == gameInfo, result[1] == [context, stateInfo, stateData]
-            updateGame(results[0][0], results[0][1]);
-            if(stateUUID) updateState(results[1][0], results[1][1], results[1][2]);
-            enableStartEmulation(context);
-            enableStartRecordPerformance(context);
-            enableStopRecordPerformance(context);
-            enableLoadLastState(context);
-            enableSaveState(context);
-        })
+        //Get information about game for loading
+        asyncGetGameInfo(context, {record: {uuid: gameUUID}},
+            function(err, c, i){
+                if(err) console.log("Error loading game " + gameUUID);
+                updateGame(c, i);
+                var tasks = [];
+                // if loading into a previous save state, load state information and data
+                if(stateUUID){
+                    tasks = [
+                        async.apply(asyncPreLoadStateFromServer, c, {record: {uuid: stateUUID}}),
+                        loadStateForPageLoad
+                    ];
+                }
+                // after all that, wire up the UI
+                async.waterfall(tasks, function(err, c){
+                    if(err) console.log("Error preloading state for page.");
+                    enableStartEmulation(context);
+                    enableStartRecordPerformance(context);
+                    enableStopRecordPerformance(context);
+                    enableLoadLastState(context);
+                    enableSaveState(context);
+                })
+            });
     }
 
     //Load initial page information into model
@@ -1045,7 +1088,7 @@ $(function() {
     initPageLoad(context0);
 });
 
-
+//Debug method for video recording, should probably remove this...
 function pixelValue(x, y, w, h, imgData){
     var r,g,b,a;
     var idx = (x << 2) + (y << 2) * w;
