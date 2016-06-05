@@ -27,6 +27,7 @@ source_exts = [
     ('\.fm2$', 'FCEUX Movie File', extractors.FM2Extractor),
     ('\.smc$', 'SNES ROM File', extractors.SMCExtractor),
     ('\.nes$', 'iNES ROM File', extractors.NESExtractor),
+    ('\.z64$', 'N64 ROM File', extractors.Z64Extractor),
     ('\.mp4$', 'MPEG-4 Movie File', extractors.GenericVideoExtractor),
     ('\.avi$', 'AVI Movie File', extractors.GenericVideoExtractor),
     ('\.mov$', 'QuickTime Movie File', extractors.GenericVideoExtractor)

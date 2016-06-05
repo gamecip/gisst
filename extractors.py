@@ -920,6 +920,44 @@ class NESExtractor(Extractor):
     def validate(self):
         return True
 
+class Z64Extractor(Extractor):
+    #   Apparently no date information in N64 dat files
+    headers = ('Padded', 'Interleaved/Swapped', 'Backup unit/emulator header', 'Checksum',
+               '2nd Checksum', 'Search checksum (CRC32)', 'Data checksum (CRC32)',
+               'DAT info'
+               )
+
+    def extract(self, options=None):
+        full_path = pipes.quote(os.path.abspath(self.source))
+
+        proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)
+        parse_data = parse_ucon64_output(proc.stdout, self.headers, 6, 13, 19)
+
+        parse_data['data_image_checksum'] = parse_data['Data checksum (CRC32)']
+        parse_data['data_image_checksum_type'] = 'crc32'
+
+        parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
+        parse_data['data_image_source'] = full_path.split('/')[-1]
+        self.extracted_info = parse_data
+
+
+    def create_citation(self):
+        citation = generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION)
+        cite_map = (('title', 'title'),
+                    ('publisher', 'publisher'),
+                    ('localization_region', 'localization_region'),
+                    ('platform', 'platform'),
+                    ('data_image_checksum', 'data_image_checksum'),
+                    ('data_image_checksum_type', 'data_image_checksum_type'),
+                    ('data_image_source', 'data_image_source'),
+                    ('source_data', 'source_data'))
+        for extract_key, schema_key in cite_map:
+            citation[schema_key] = self.extracted_info[extract_key]
+
+        return citation, {}
+
+    def validate(self):
+        return True
 
 #   Directory Extractor
 #   Used for games that are contained in a directory structure
@@ -936,7 +974,7 @@ class DirectoryExtractor(Extractor):
             dir_relative_path = "" if dir_path == d else d.replace(dir_path, "")
 
             # check if hidden directory and skip
-            if re.match("\.[a-zA-Z]+", dir_relative_path):
+            if re.match("\.[a-zA-Z0-9]+", dir_relative_path):
                 continue
 
             main_executable = options.get('main_executable')
