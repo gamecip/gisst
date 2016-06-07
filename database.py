@@ -63,6 +63,7 @@ class DatabaseManager:
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     SAVE_STATE_PERFORMANCE_LINK_TABLE = 'save_state_performance_link_table'
     FILE_PATH_SAVE_STATE_LINK_TABLE = 'file_path_save_state_link_table'
+    SCREENSHOT_LINK_TABLE = 'screenshot_link_table'
     FTS_INDEX_TABLE = 'fts_index_table'
     FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
 
@@ -134,6 +135,7 @@ class DatabaseManager:
             ('emt_stack_pointer',                   'integer',              field_constraint),
             ('stack_pointer',                       'integer',              field_constraint),
             ('time',                                'integer',              field_constraint),
+            ('has_screen',                          'integer',              field_constraint),
             ('created_on',                          'datetime',             field_constraint), #    If this is imported, get creation date of file
             ('created',                             'datetime',             field_constraint)  #    Timestamp for db entry
         ],
@@ -169,6 +171,10 @@ class DatabaseManager:
             ('performance_uuid', 'text', field_constraint),
             ('save_state_uuid', 'text', field_constraint),
             ('time_index', 'integer', field_constraint)
+        ],
+        SCREENSHOT_LINK_TABLE: [
+            ('performance_uuid', 'text', field_constraint),
+            ('time_index', 'text', field_constraint)
         ]
     }
 
@@ -359,6 +365,7 @@ class DatabaseManager:
         values.append(fields.get('emulator_name'))
         values.append(fields.get('emulator_version'))
         values.append(fields.get('emt_stack_pointer'))
+        values.append(fields.get('has_screen'))
         values.append(fields.get('stack_pointer'))
         values.append(fields.get('system_time'))
         values.append(fields.get('created_on'))
@@ -384,6 +391,11 @@ class DatabaseManager:
         values.append(fields.get('file_path'))
         values.append(fields.get('source_data'))
         result = cls.insert_into_table(table, cls.headers[table], values)
+
+    @classmethod
+    def add_screen_to_state(cls, uuid):
+        cls.update_table(cls.GAME_SAVE_TABLE, ('has_screen',), (True,), ['uuid'], [uuid])
+        return True
 
     #   Copy existing file information to new record for save_state
     @classmethod

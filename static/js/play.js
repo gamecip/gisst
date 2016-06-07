@@ -2,9 +2,10 @@
  * Citetool Editor Performance and State Creation Tool
  * Created by erickaltman on 2/29/16.
  */
+var CiteManager;
 $(function() {
 
-var CiteManager = (function(modules){
+CiteManager = (function(modules){
 
     //CNG-----------CONSTANTS/GLOBALS--------------------
     var SINGULAR_STATE = "singleState";
@@ -41,6 +42,7 @@ var CiteManager = (function(modules){
     //Record Creation
     function addStateRecordURL(gameUUID){ return "/state/" + gameUUID + '/add' }
     function addStateDataURL(stateUUID){ return "/state/" + stateUUID + '/add_data' }
+    function addStateScreenURL(stateUUID){ return "/state/" + stateUUID + '/add_screen_data' }
     function addPerformanceRecordURL(gameUUID){ return "/performance/" + gameUUID + '/add'}
     function updatePerformanceRecordURL(perfUUID){ return "/performance/" + perfUUID + '/update'}
 
@@ -546,7 +548,8 @@ var CiteManager = (function(modules){
                         context.stateDataSaveQueue.push(createSaveStateDataTask(context,
                             info,
                             {buffer: stateData, compressed: false},
-                            SINGULAR_STATE
+                            SINGULAR_STATE,
+                            CiteState.canvasCaptureScreen(context.emu)
                         ), callback)
                     }else{
                         context.stateDataSaveQueue.push(createSaveStateDataTask(context,
@@ -558,7 +561,8 @@ var CiteManager = (function(modules){
                                 stack: stateData.stack,
                                 time: stateData.time
                             },
-                            DEPENDENT_STATE
+                            DEPENDENT_STATE,
+                            CiteState.canvasCaptureScreen(context.emu)
                         ), callback)
                     }
                 });
@@ -566,10 +570,10 @@ var CiteManager = (function(modules){
     }
 
     //State Save Task Factory Functions (just to make sure task object is consistent)
-    function createSaveStateDataTask(context, gameInfo, stateData, stateType){
+    function createSaveStateDataTask(context, gameInfo, stateData, stateType, screenData){
         //needed for capturing ui description, as the label could change after call
         //might add stateInfo as parameter if more complementary information is needed
-        return {context: context, info: gameInfo, data: stateData, type: stateType}
+        return {context: context, info: gameInfo, data: stateData, type: stateType, screen: screenData}
     }
 
     function asyncSaveStateData(info, data, callback){
@@ -583,6 +587,17 @@ var CiteManager = (function(modules){
             callback(null, i, data)
         })
     }
+    
+    function asyncSaveStateScreenData(info, screen, callback){
+        var post_data = {
+            buffer: StringView.bytesToBase64(screen.data),
+            width: screen.width,
+            height: screen.height
+        };
+        $.post(addStateScreenURL(info.record.uuid), post_data, function(i){
+            callback(null, i)
+        })
+    }
 
     //Manage the compression and uploading of save state data
     function processSaveStateData(task, callback){
@@ -591,9 +606,11 @@ var CiteManager = (function(modules){
         if(task.type === SINGULAR_STATE){
             asyncSaveStateData(task.info, task.data, function(err, ti, td){
                 if(err) console.log("Error with state save of " + task.info.record.uuid);
-                asyncGetStateInfo(task.context, task.info, function(e, c, i){
-                    callback(c, i, td);
-                });
+                asyncSaveStateScreenData(task.info, task.screen, function(iWithScreen){
+                    asyncGetStateInfo(task.context, task.info, function(e, c, i){
+                        callback(c, i, td);
+                    });
+                })
             });
         }else if(task.type === DEPENDENT_STATE){
             var saveStateWorker = new Worker("/static/js/save-state-worker.js");
@@ -606,9 +623,11 @@ var CiteManager = (function(modules){
                 }else if(data.type === "finished"){
                     saveStateWorker.terminate();
                     if(callback){
-                        asyncGetStateInfo(task.context, task.info, function(e, c, i){
-                            callback(c, i, data.data);
-                        });
+                        asyncSaveStateScreenData(task.info, task.screen, function(iWithScreen){
+                            asyncGetStateInfo(task.context, iWithScreen, function(e, c, i){
+                                callback(c, i, data.data);
+                            });
+                        })
                     }
                 }
             };

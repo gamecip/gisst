@@ -8,14 +8,15 @@ import base64
 import datetime
 import fnmatch
 import shutil
-import hashlib
 from collections import OrderedDict
 from flask import Flask, Blueprint, redirect, request, url_for, Response
 from flask import render_template, send_file, jsonify
+from PIL import Image
 from database import DatabaseManager as dbm
 from database import (
     LOCAL_GAME_DATA_STORE,
-    LOCAL_DATA_ROOT
+    LOCAL_DATA_ROOT,
+    LOCAL_CITATION_DATA_STORE
 )
 from schema import (
     GAME_CITE_REF,
@@ -266,6 +267,23 @@ def add_save_state(uuid):
     save_state = dbm.retrieve_save_state(uuid=state_uuid)[0]
     return jsonify({'record': save_state})
 
+@app.route("/state/<uuid>/add_screen_data", methods=['POST'])
+def add_screen_data(uuid):
+    screen_data = bytes(base64.b64decode(request.form.get('buffer')))
+    width = int(request.form.get('width'))
+    height = int(request.form.get('height'))
+    image = Image.frombytes("RGBA", (width, height), screen_data)
+
+    # Doing the saving here for now, might move later?
+    base_path = os.path.join(LOCAL_CITATION_DATA_STORE, uuid)
+    if not os.path.exists(base_path):
+        os.makedirs(base_path)
+    image.save(os.path.join(base_path, 'screen_{}.png'.format(uuid)), "PNG")
+
+    dbm.add_screen_to_state(uuid) # one screen per state, so only change 'has_screen' parameter
+    state = dbm.retrieve_save_state(uuid=uuid)[0]
+    return jsonify({'record': state})
+
 @app.route("/state/<uuid>/add_data", methods=['POST'])
 def add_save_state_data(uuid):
     save_state_data = request.form.get('buffer')
@@ -436,11 +454,10 @@ def gif():
 
     subprocess.call(["citetool_editor", "gif_performance", "--regenerate", uuid, start, end])
 
-    location_info = {'gif_location': '/cite_data/{0}/gif/{1}_{2}/{3}_{1}_{2}.gif'.format(
-        source_hash,
+    location_info = {'gif_location': '/cite_data/{0}/{0}_{1}_{2}.gif'.format(
+        uuid,
         start,
-        end,
-        uuid
+        end
     )}
 
     return jsonify(**location_info)
