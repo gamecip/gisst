@@ -606,7 +606,7 @@ CiteManager = (function(modules){
         if(task.type === SINGULAR_STATE){
             asyncSaveStateData(task.info, task.data, function(err, ti, td){
                 if(err) console.log("Error with state save of " + task.info.record.uuid);
-                asyncSaveStateScreenData(task.info, task.screen, function(iWithScreen){
+                asyncSaveStateScreenData(task.info, task.screen, function(err, iWithScreen){
                     asyncGetStateInfo(task.context, task.info, function(e, c, i){
                         callback(c, i, td);
                     });
@@ -623,7 +623,7 @@ CiteManager = (function(modules){
                 }else if(data.type === "finished"){
                     saveStateWorker.terminate();
                     if(callback){
-                        asyncSaveStateScreenData(task.info, task.screen, function(iWithScreen){
+                        asyncSaveStateScreenData(task.info, task.screen, function(err, iWithScreen){
                             asyncGetStateInfo(task.context, iWithScreen, function(e, c, i){
                                 callback(c, i, data.data);
                             });
