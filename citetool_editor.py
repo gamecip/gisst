@@ -51,9 +51,29 @@ def cli(ctx, verbose, no_prompts):
     ctx.obj = dict()    # Context object that stores application state in dict, could make class at some point
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['NO_PROMPTS'] = no_prompts
-    check_for_data_root()
-    check_for_fts_lib() #   Hack right now, will change
-    check_for_db_and_data()
+    #   Check for data root
+    if not os.path.exists(LOCAL_DATA_ROOT):
+        click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
+        os.makedirs(LOCAL_DATA_ROOT)
+
+    #   Check for fts lib
+    if os.path.exists(dbm.FTS_EXT_PATH):
+        pass
+    else:
+        if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib"):
+            click.echo("Copying fts5.dylib to {}".format(LOCAL_DATA_ROOT))
+            shutil.copy(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib", LOCAL_DATA_ROOT)
+        else:
+            click.echo("Please put ft5.dylib into {} and run citetool-editor again.".format(LOCAL_DATA_ROOT))
+
+    # Check for tables, extracted, game citation and performance citation
+    dbm.create_tables()
+
+    # Check for data directory
+    for data_path, path_name in ((LOCAL_GAME_DATA_STORE, "game data"), (LOCAL_CITATION_DATA_STORE, "citation data")):
+        if not os.path.exists(data_path):
+            click.echo("Local {} store: '{}' not found, creating...".format(path_name, data_path))
+            os.makedirs(data_path)
 
 
 @cli.command(help='Run local access server for citations.')
@@ -818,32 +838,6 @@ def prompt_input(prompt_text, options):
             continue
         else:
             return s
-
-def check_for_data_root():
-    if not os.path.exists(LOCAL_DATA_ROOT):
-        click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
-        os.makedirs(LOCAL_DATA_ROOT)
-
-def check_for_db_and_data():
-    # Check for tables, extracted, game citation and performance citation
-    dbm.create_tables()
-
-    # Check for data directory
-    for data_path, path_name in ((LOCAL_GAME_DATA_STORE, "game data"), (LOCAL_CITATION_DATA_STORE, "citation data")):
-        if not os.path.exists(data_path):
-            click.echo("Local {} store: '{}' not found, creating...".format(path_name, data_path))
-            os.makedirs(data_path)
-
-def check_for_fts_lib():
-    if os.path.exists(dbm.FTS_EXT_PATH):
-        pass
-    else:
-        if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib"):
-            click.echo("Copying fts5.dylib to {}".format(LOCAL_DATA_ROOT))
-            shutil.copy(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib", LOCAL_DATA_ROOT)
-        else:
-            click.echo("Please put ft5.dylib into {} and run citetool-editor again.".format(LOCAL_DATA_ROOT))
-
 
 @cli.command(help='Clear local data')
 @click.option('--ignore_game_data', help="Clear everything but local game data files.")

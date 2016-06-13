@@ -5,6 +5,9 @@
     <title>Playing {{ cite_ref['title']}}</title>
     <link href="/static/css/citetool_editor.css" rel="stylesheet" type="text/css">
     <script src="/static/js/jquery-2.1.4.min.js"></script>
+    <script src="/static/js/react.js"></script>
+    <script src="/static/js/react-dom.js"></script>
+    <script src="/static/js/react-tabs.js"></script>
     <script src="/static/js/cite-game/recorder/recorder-worker.js"></script>
     <script src="/static/js/cite-game/citestate.js"></script>
     <script src="/static/js/stringview.js"></script>
@@ -12,9 +15,11 @@
     <script src="/static/js/sha1.js"></script>
     <script src="/static/js/lzma.js"></script>
     <script src="/static/js/async.js"></script>
+    <script src="/static/js/ui-modules.js"></script>
     <script src="/static/js/play.js"></script>
 </head>
 <body data-game-uuid="{{ cite_ref['uuid'] }}" data-state-uuid="{{ init_state['uuid'] }}">
 <a href="/citations">Citations</a>
+<div id="uiBase"></div>
 </body>
 </html>

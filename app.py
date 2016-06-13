@@ -159,7 +159,9 @@ def emulation_info_game(uuid):
         game_info['stateFileURL'] = None
         game_info['record'] = game_ref.elements
         game_info['availableStates'] = filter(lambda s: True if s.get('save_state_source_data') or s.get('rl_starts_data') else False, dbm.retrieve_save_state(game_uuid=uuid))
+        game_info['availablePerformances'] = [dict(p.get_element_items()) for p in dbm.retrieve_derived_performances(uuid)]
     return jsonify(game_info)
+
 
 @app.route("/json/performance_info/<uuid>")
 def performance_info(uuid):
@@ -167,6 +169,7 @@ def performance_info(uuid):
     perf_ref = dbm.retrieve_perf_ref(uuid)
     perf_info['record'] = perf_ref.elements
     perf_info['linkedStates'] = dbm.retrieve_all_state_perf_links(uuid)
+    perf_info['availablePerformances'] = [dict(p.get_element_items()) for p in dbm.retrieve_derived_performances(perf_ref['game_uuid'])]
     return jsonify(perf_info)
 
 
@@ -507,3 +510,7 @@ def send_file_partial(path):
     rv.headers.add('Content-Range', 'bytes {0}-{1}/{2}'.format(byte1, byte1 + length - 1, size))
 
     return rv
+
+@app.route('/test-ui')
+def test_ui():
+    return render_template('testui.html')
