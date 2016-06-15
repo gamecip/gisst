@@ -9,10 +9,11 @@ var UI = (function(){
 
 
     /*
-    Basic consts for events (since I keep forgetting them)
+    Basic consts for events (since I keep forgetting them), naming is getting pretty bad, oh well
      */
 
     const STATE_SELECT_CLICK_EVENT = "stateSelectClickEvent";
+    const STATE_SELECT_START_CLICK_EVENT = "stateSelectStartClickEvent";
     const PERF_SELECT_CLICK_EVENT = "perfSelectClickEvent";
     const START_RECORDING_CLICK_EVENT = "startRecordingClickEvent";
     const STOP_RECORDING_CLICK_EVENT = "stopRecordingClickEvent";
@@ -24,6 +25,7 @@ var UI = (function(){
     const SAVE_STATE_FINISH_STATUS_EVENT = "saveStateFinishStatusEvent";
     const ADD_STATUS_ALERT_EVENT = "addStatusAlertEvent";
     const REMOVE_STATUS_ALERT_EVENT = "removeStatusAlertEvent";
+    const GENERAL_STATUS_ALERT_EVENT = "generalStatusAlertEvent";
     
 
 
@@ -117,7 +119,12 @@ var UI = (function(){
 
     var EmulationAnalyzer = React.createClass({
         getInitialState: function (){
-            return {update: false, statusAlerts: [], statusCounter: 0}
+            var alerts = [];
+            var ctx = CiteManager.getContextById(this.props.contextId);
+            if(ctx.lastState){
+                alerts.push({statusType: GENERAL_STATUS_ALERT_EVENT, message: "Preloaded: " + ctx.lastState.record.description})
+            }
+            return {update: false, statusAlerts: alerts, statusCounter: 0}
         },
         componentDidMount: function(){
             var me = this;
@@ -279,6 +286,12 @@ var UI = (function(){
                     ReactDOM.findDOMNode(me).dispatchEvent(new Event('contextUpdate', {'bubbles':true, 'cancelable': true}))
                 })
             });
+
+            node.addEventListener(STATE_SELECT_START_CLICK_EVENT, function(e){
+                CiteManager.startEmulationWithState(me.props.contextId, e.detail, function(context){
+                    ReactDOM.findDOMNode(me).dispatchEvent(new Event('contextUpdate', {'bubbles': true, 'cancelable': true}))
+                })
+            });
         },
         componentWillReceiveProps: function(nextProps){
             var ctx = CiteManager.getContextById(this.props.contextId);
@@ -300,7 +313,7 @@ var UI = (function(){
                                 React.createElement(Tab, {}, "Available Performances")
                             ),
                             React.createElement(TabPanel, {},
-                                React.createElement(StateListing, {availableStates: this.state.availableStates})
+                                React.createElement(StateListing, {started: this.state.startedEmulation, availableStates: this.state.availableStates})
                             ),
                             React.createElement(TabPanel, {},
                                 React.createElement(PerformanceListing, {availablePerformances: this.state.availablePerformances})
@@ -359,10 +372,11 @@ var UI = (function(){
     var StateListing = React.createClass({
         displayName: "StateListing",
         render: function (){
+            var me = this;
             return (
                 React.DOM.div({style:stateListingStyle},
                     this.props.availableStates.map(function(s){
-                        return React.createElement(StateItem, {key:'StateItem_' + s.uuid,record: s})
+                        return React.createElement(StateItem, {key:'StateItem_' + s.uuid,record: s, started: me.props.started})
                     })
                 )
             )
@@ -373,8 +387,12 @@ var UI = (function(){
         displayName: "StateItem",
         stateSelectClick: function(e){
             e.stopPropagation();
-            ReactDOM.findDOMNode(this).dispatchEvent(new CustomEvent(STATE_SELECT_CLICK_EVENT,
-                {"detail": this.props.record.uuid, "bubbles": true, "cancelable": true }))
+            var node = ReactDOM.findDOMNode(this);
+            if(this.props.started){
+                node.dispatchEvent(new CustomEvent(STATE_SELECT_CLICK_EVENT, {"detail": this.props.record.uuid, "bubbles": true, "cancelable": true }))
+            }else{
+                node.dispatchEvent(new CustomEvent(STATE_SELECT_START_CLICK_EVENT, {"detail": this.props.record.uuid, "bubbles": true, "cancelable": true }));
+            }
         },
         render: function (){
             var screenURL = "/cite_data/" + this.props.record.uuid + "/screen_" + this.props.record.uuid + ".png";
@@ -537,8 +555,14 @@ var UI = (function(){
     var GameFileListing = React.createClass({
         render: function (){
             var fi = this.props.fileInformation;
+            var fi_keys;
+            try{
+                fi_keys = Object.keys(fi);
+            }catch(e){
+                fi_keys = [];
+            }
             return (
-                React.DOM.ul({}, Object.keys(fi).map(function(fi_key){
+                React.DOM.ul({}, fi_keys.map(function(fi_key){
                     var key = fi_key + "_" + fi[fi_key].game_uuid;
                     return React.DOM.li({key:key}, fi_key)
                 }))

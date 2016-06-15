@@ -530,7 +530,7 @@ CiteManager = (function(modules){
 
     //Needed to separate state data load from emulator load so that we can loadState immediately on
     //emulation start up
-    function loadStateForPageLoad(context, info, data, callback){
+    function loadStateForStartUp(context, info, data, callback){
 
         function prepForStartEmulation(err, c, i, d){
             //Need new dataObject so that cache is correct
@@ -845,7 +845,7 @@ CiteManager = (function(modules){
                 if(stateUUID){
                     tasks = [
                         async.apply(asyncPreLoadStateFromServer, c, {record: {uuid: stateUUID}}),
-                        loadStateForPageLoad
+                        loadStateForStartUp
                     ];
                 }
                 // after all that see if there's an error
@@ -866,10 +866,19 @@ CiteManager = (function(modules){
             asyncStartEmulation(this.getContextById(contextId), cb);
         },
         startEmulationWithState: function(contextId, stateUUID, cb){
-            //TODO: write this part
+            var me = this;
+            asyncPreLoadStateFromServer(this.getContextById(contextId), {record: {uuid: stateUUID}},
+                function(err, c, i, d){ //pre load returns compressed data, loadStateForStartUp
+                    loadStateForStartUp(c, i, d, function(){
+                        me.startEmulation(contextId, cb);
+                    });
+                })
         },
         loadPreviousState: function(contextId, cb){
-            
+            var ctx = this.getContextById(contextId);
+            if(ctx.lastState){
+                this.loadState(contextId, ctx.lastState.record.uuid, cb);
+            }
         },
         saveState: function(contextId, cb){
             initSaveState(this.getContextById(contextId), function(err, c, i, d){cb(c)});
