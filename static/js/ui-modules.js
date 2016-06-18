@@ -26,9 +26,28 @@ var UI = (function(){
     const ADD_STATUS_ALERT_EVENT = "addStatusAlertEvent";
     const REMOVE_STATUS_ALERT_EVENT = "removeStatusAlertEvent";
     const GENERAL_STATUS_ALERT_EVENT = "generalStatusAlertEvent";
-    
+    const CONTEXT_UPDATE_EVENT = "contextUpdateEvent";
 
+    /*
+    Form header information, mainly for display and update form exclusions
+     */
+    var UPDATE_EXCLUDED_GAME_FIELDS = ['uuid', 'data_image_checksum_type', 'data_image_checksum', 'data_image_source', 'source_url', 'source_data', 'schema_version'];
+    var UPDATE_EXCLUDED_PERF_FIELDS = ['uuid', 'game_uuid', 'replay_source_purl', 'replay_source_file_ref', 'replay_source_file_name', 'emulator_system_dependent_images', 'emulator_system_configuration', 'previous_performance_uuid', 'schema_version'];
+    var UPDATE_EXCLUDED_STATE_FIELDS = ['id', 'uuid', 'game_uuid', 'save_state_source_data', 'compressed', 'rl_starts_data', 'rl_lengths_data', 'rl_total_length', 'save_state_type', 'emt_stack_pointer', 'stack_pointer', 'time', 'has_screen', 'created_on', 'created'];
+    var UPDATE_EXCLUDED_FIELDS = UPDATE_EXCLUDED_GAME_FIELDS.concat(UPDATE_EXCLUDED_PERF_FIELDS).concat(UPDATE_EXCLUDED_STATE_FIELDS);
 
+    var DISPLAY_GAME_FIELDS = ['copyright_year', 'date_published', 'developer', 'distributor', 'localization_region', 'notes', 'platform', 'publisher', 'title', 'version'];
+    var DISPLAY_PERF_FIELDS = ['additional_info', 'description', 'emulator_name', 'emulator_version', 'location', 'notes', 'performer', 'recording_agent', 'start_datetime', 'title'];
+    var DISPLAY_STATE_FIELDS = ['description', 'emulator_name', 'emulator_version'];
+    var DISPLAY_FIELDS = DISPLAY_GAME_FIELDS.concat(DISPLAY_PERF_FIELDS).concat(DISPLAY_STATE_FIELDS);
+
+    /*
+    Static util functions (no where else to put them right now)
+     */
+    function snakeToTitle(snakeCaseText){
+        function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+        return new Array(snakeCaseText.split("_").map(function(cv, i, a){ return i !== a.length -1 ? capitalize(cv) + " " : capitalize(cv)})).join().replace(/,/g, "");
+    }
 
     /*
     * All the style code needed to render layouts
@@ -111,8 +130,13 @@ var UI = (function(){
      *           StateListing
      *           PerformanceListing
      *       TabComponent
-     *           PerformanceReview
-     *           UpdateForm
+     *          Game
+     *              InfoTable
+     *          State
+     *              InfoTable
+     *          Performance
+     *              PerformanceReview
+     *              InfoTable
      *
      *  UI components, nesting listed above here
      * */
@@ -130,7 +154,7 @@ var UI = (function(){
             var me = this;
 
             var node = ReactDOM.findDOMNode(this);
-            node.addEventListener('contextUpdate', function(){
+            node.addEventListener(CONTEXT_UPDATE_EVENT, function(){
                 me.setState({update: !me.state.update}); //basically just trigger a refresh
             });
 
@@ -201,7 +225,7 @@ var UI = (function(){
             return (
                 React.DOM.div({style:{width:"75%", border:'solid 1px blue', display:'flex', flexFlow:'row'}},
                     this.props.alerts.map(function(s, i, sa){
-                        return React.createElement(StatusItem, {id: s.id, message: s.message });
+                        return React.createElement(StatusItem, {key: "status_" + s.id ,id: s.id, message: s.message });
                     })
                 )
             )
@@ -211,7 +235,7 @@ var UI = (function(){
     var StatusItem = React.createClass({
         render: function(){
             return (
-                React.DOM.div({style:statusItemStyle, key: "status_"+this.props.id, id: this.props.id, className:'statusItem'}, this.props.message)
+                React.DOM.div({style:statusItemStyle, id: this.props.id, className:'statusItem'}, this.props.message)
             )
         }
     });
@@ -230,7 +254,7 @@ var UI = (function(){
             return state;
         },
         dispatchStatusEvent: function(node, message, statusType){
-            node.dispatchEvent(new CustomEvent(ADD_STATUS_ALERT_EVENT, {detail: {message: message, statusType: statusType}, 'bubbles':true}))
+            node.dispatchEvent(new CustomEvent(ADD_STATUS_ALERT_EVENT, {detail: {message: message, statusType: statusType}, 'bubbles': true, 'cancelable': true}))
         },
         componentDidMount: function(){
             var me = this;
@@ -251,7 +275,8 @@ var UI = (function(){
             node.addEventListener(START_RECORDING_CLICK_EVENT, function(){
                 CiteManager.startRecording(me.props.contextId, function(c){
                     me.dispatchStatusEvent(node, "Started recording performance: " + c.currentPerformance.record.uuid, START_RECORDING_STATUS_EVENT);
-                    me.setState({availableStates: c.availableStates});
+                }, function(err, c){ //err needed due to return callback for initSaveState
+                    me.setState({availableStates: c.availableStates})
                 })
             });
 
@@ -261,10 +286,13 @@ var UI = (function(){
             node.addEventListener(STOP_RECORDING_CLICK_EVENT, function (){
                 var perf = CiteManager.getContextById(me.props.contextId).currentPerformance.record;
                 me.dispatchStatusEvent(node, "Stop recording performance (called): " + perf['uuid'] + " called.", STOP_RECORDING_CALLED_STATUS_EVENT);
-                CiteManager.stopRecording(me.props.contextId, function(c){
-                    me.dispatchStatusEvent(node, "Stop recording performance (complete): " + c.currentPerformance.record.uuid, STOP_RECORDING_COMPLETE_STATUS_EVENT);
-                    me.setState({availableStates: c.availableStates, availablePerformances: c.availablePerformances});
-                })
+                CiteManager.stopRecording(me.props.contextId,
+                    function(c){
+                        me.dispatchStatusEvent(node, "Stop recording performance (complete): " + c.currentPerformance.record.uuid, STOP_RECORDING_COMPLETE_STATUS_EVENT);
+                        me.setState({availablePerformances: c.availablePerformances});},
+                    function(err, c){//err needed due to return callback for initSaveState
+                        me.setState({availableStates: c.availableStates})
+                    })
             });
 
             node.addEventListener('mute', function(e){
@@ -283,13 +311,13 @@ var UI = (function(){
 
             node.addEventListener(STATE_SELECT_CLICK_EVENT, function(e){
                 CiteManager.loadState(me.props.contextId, e.detail, function(context){
-                    ReactDOM.findDOMNode(me).dispatchEvent(new Event('contextUpdate', {'bubbles':true, 'cancelable': true}))
+                    ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles':true, 'cancelable': true}))
                 })
             });
 
             node.addEventListener(STATE_SELECT_START_CLICK_EVENT, function(e){
                 CiteManager.startEmulationWithState(me.props.contextId, e.detail, function(context){
-                    ReactDOM.findDOMNode(me).dispatchEvent(new Event('contextUpdate', {'bubbles': true, 'cancelable': true}))
+                    ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles': true, 'cancelable': true}))
                 })
             });
         },
@@ -475,20 +503,15 @@ var UI = (function(){
         },
         componentWillReceiveProps: function(nextProps){
             var ctx = CiteManager.getContextById(this.props.contextId);
+            var lastSelectedPerfRecord = this.getSelectedPerformance(nextProps.selectedPerformance, ctx.availablePerformances);
+            var lastSelectedStateRecord = ctx.lastState ? ctx.lastState.record : {};
             this.setState({currentGameRecord: ctx.currentGame.record,
                 currentGameFiles: ctx.currentGame.fileInformation,
-                lastSelectedStateRecord: ctx.lastState.record,
-                lastSelectedPerfRecord: this.getSelectedPerformance(nextProps.selectedPerformance, ctx.availablePerformances)
+                lastSelectedStateRecord: lastSelectedStateRecord,
+                lastSelectedPerfRecord: lastSelectedPerfRecord,
+                lastSelectPerformanceId: lastSelectedPerfRecord ? lastSelectedPerfRecord.uuid : "",
+                lastStateId: lastSelectedStateRecord ? lastSelectedStateRecord.uuid : ""
             });
-        },
-        itemize: function(obj){
-            var items = [];
-            for(var key in obj){
-                if(obj.hasOwnProperty(key)){
-                    items.push([key, obj[key]])
-                }
-            }
-            return items;
         },
         render: function(){
             var perfURL = "";
@@ -505,16 +528,15 @@ var UI = (function(){
                             React.createElement(Tab, {}, "Real Time")
                         ),
                         React.createElement(TabPanel, {},
-                            React.createElement(InfoTable, {id: this.state.currentGameRecord.uuid, items: this.itemize(this.state.currentGameRecord)}),
+                            React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'game', id: this.state.currentGameRecord.uuid, record: this.state.currentGameRecord}),
                             React.createElement(GameFileListing, {fileInformation: this.state.currentGameFiles})
                         ),
                         React.createElement(TabPanel, {},
-                            React.createElement(InfoTable, {id: this.state.lastStateId, items: this.itemize(this.state.lastSelectedStateRecord)})
+                            React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'state', id: this.state.lastStateId, record: this.state.lastSelectedStateRecord})
                         ),
                         React.createElement(TabPanel, {},
-                            React.createElement(InfoTable, {id: this.state.lastSelectPerformanceId, items: this.itemize(this.state.lastSelectedPerfRecord)}),
-                            React.createElement(PerformanceReview, {performanceVideoURL: perfURL}),
-                            React.createElement(UpdateForm, {})
+                            React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'performance', id: this.state.lastSelectPerformanceId, record: this.state.lastSelectedPerfRecord}),
+                            React.createElement(PerformanceReview, {performanceVideoURL: perfURL, id: this.state.lastSelectPerformanceId})
                         ),
                         React.createElement(TabPanel, {},
                             React.DOM.h1({}, "Heap Information Here")
@@ -526,32 +548,107 @@ var UI = (function(){
     });
 
     var PerformanceReview = React.createClass({
+        getInitialState: function(){
+            return {linkedStates: []}
+        },
+        componentDidMount: function(){
+            $.get(CiteManager.jsonPerformanceInfoURL(this.props.id), function(result){
+                this.setState({linkedStates: result.linkedStates})
+            }.bind(this))
+        },
+        componentWillReceiveProps: function(){
+            $.get(CiteManager.jsonPerformanceInfoURL(this.props.id), function(result){
+                this.setState({linkedStates: result.linkedStates})
+            }.bind(this))
+        },
         render: function (){
             return (
-                React.DOM.video({style:performanceReviewVideoStyle, src: this.props.performanceVideoURL, type:"video/mp4", controls:true})
+                React.DOM.div({id: "performanceReview_" + this.props.id },
+                    React.DOM.video({style:performanceReviewVideoStyle, src: this.props.performanceVideoURL, type:"video/mp4", controls:true}),
+                    this.state.linkedStates.map(function(linkRecord, index){
+                        return React.DOM.div({key: "linkedState_" + linkRecord.state_record.uuid }, "time index " + linkRecord.time_index + " state: " + linkRecord.state_record.uuid);
+                    }, this)
+                )
             );
         }
     });
 
     var InfoTable = React.createClass({
+        getInitialState: function(){
+            return {editable: false, formData: this.props.record}
+        },
+        editInfoClick: function(){
+            var me = this;
+            if(this.state.editable){
+                var updateObject = {};
+                for(var key in this.state.formData){
+                    if(this.state.formData.hasOwnProperty(key)){
+                        //if the value has been updated
+                        if(this.props.record[key] !== this.state.formData[key]){
+                            updateObject[key] = this.state.formData[key];
+                        }
+                    }
+                }
+                //Make sure you actually have something to update, otherwise just remove inputs
+                if(!$.isEmptyObject(updateObject)){
+                    CiteManager.updateCiteRecord(this.props.contextId, this.props.recordType, this.props.record.uuid, updateObject, function(record){
+                        ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles': true, 'cancelable': true})); //Causes refresh which should update incoming prop record
+                        me.setState({editable: false});
+                    });
+                }else{
+                    this.setState({editable: false})
+                }
+            }else{
+                this.setState({editable: true})
+            }
+        },
+        itemize: function(obj){
+            var items = [];
+            for(var key in obj){
+                if(obj.hasOwnProperty(key)){
+                    items.push([key, obj[key]])
+                }
+            }
+            return items;
+        },
+        infoItemChange: function(e){
+            var key = e.currentTarget.name;
+            var val = e.currentTarget.value;
+
+            //copy form data
+            var no = {};
+            for(var k in this.state.formData){
+                if(this.state.formData.hasOwnProperty(k)){
+                    no[k] = this.state.formData[k];
+                }
+            }
+            //copy over change
+            no[key] = val;
+
+            //set new state
+            this.setState({formData: no})
+        },
+        componentWillReceiveProps: function(nextProps){
+            this.setState({formData: nextProps.record});
+        },
         render: function (){
             var me = this;
             return (
-                React.DOM.ul({}, this.props.items.map(function(i){
-                    return React.DOM.li({key: me.props.id + "_" + i[0]}, i[0] + " : " + i[1]);
-                }))
+                React.DOM.ul({}, this.itemize(this.state.formData).map(function(i){
+                    var key = i[0];
+                    var val = i[1] ? i[1] : undefined;
+                    if(DISPLAY_FIELDS.indexOf(key) !== -1){
+                        if(me.state.editable && UPDATE_EXCLUDED_FIELDS.indexOf(key) == -1){
+                            return React.DOM.li({key:'infoItem_' + me.props.id + "_" + key}, snakeToTitle(key) + " : ", React.DOM.input({type: 'text', name: key, value: val, onChange: me.infoItemChange}));
+                        }else{
+                            return React.DOM.li({key:'infoItem_' + me.props.id + "_" + key}, snakeToTitle(key) + " : " + val);
+                        }
+                    }
+                }), React.DOM.button({onClick: this.editInfoClick }, this.state.editable ? "Submit" : "Edit Info"))
             )
         }
     });
 
-    var UpdateForm = React.createClass({
-        render: function (){
-            return (
-                React.DOM.h1({}, "UpdateForm")
-            );
-        }
-    });
-    
     var GameFileListing = React.createClass({
         render: function (){
             var fi = this.props.fileInformation;

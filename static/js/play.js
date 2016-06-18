@@ -49,6 +49,8 @@ CiteManager = (function(modules){
     function addStateScreenURL(stateUUID){ return "/state/" + stateUUID + '/add_screen_data' }
     function addPerformanceRecordURL(gameUUID){ return "/performance/" + gameUUID + '/add'}
     function updatePerformanceRecordURL(perfUUID){ return "/performance/" + perfUUID + '/update'}
+    function updateGameRecordURL(gameUUID){ return "/game/" + gameUUID + '/update'}
+    function updateStateRecordURL(stateUUID){ return "/state/" + stateUUID + '/update'}
 
     function addStateRecordAJAX(context, stateInfo, callback){
         var dataObject = {};
@@ -312,7 +314,11 @@ CiteManager = (function(modules){
             //Performance information and timing
             if(context.currentPerformance){
                 record.performance_uuid = context.currentPerformance.record.uuid;
-                if(context.emu.recording) record.performance_time_index = saveTimeInt - context.startedRecordingTime;
+                if(context.startRecordingCalled){
+                    record.performance_time_index = 0;
+                }else if(context.emu.recording){
+                    record.performance_time_index = saveTimeInt - context.startedRecordingTime;
+                }
                 //  Check to see if this is a state save terminal
                 if(context.hasFinishedRecording){
                     record.performance_time_index = saveTimeInt - context.previousStartedRecordingTime;
@@ -605,12 +611,11 @@ CiteManager = (function(modules){
 
     var savePerformanceDataQueue = async.queue(processPerformanceDataSave, 2);
 
-    function startRecording(context, cb){
+    function startRecording(context, recordCb, stateCb){
         var tasks = [];
         if(context.emu){
             //start recording, save new initial state for performance
             tasks.push(async.apply(asyncStartRecording, context));
-            tasks.push(async.apply(initSaveState, context));
         }else{
             //start emulation and recording
             tasks.push(async.apply(asyncStartEmulationWithRecording, context));
@@ -625,33 +630,32 @@ CiteManager = (function(modules){
 
         addPerformanceRecordAJAX(context, function(err, context, info){
             updatePerformance(context, info);
+            initSaveState(context, stateCb); //Save State does not need to be part of start recording call chain
             async.series(tasks, function(){
                 //Update everything after you're finished
                 asyncGetPerformanceInfo(context, info, function(err, c, i){
                     updatePerformance(c, i);
-                    cb(c);
+                    recordCb(c);
                 })
             });
         });
     }
 
-    function stopRecording(context, callback){
+    function stopRecording(context, recordCb, stateCb){
         if(context.emu.recording){
-            async.parallel([
-                async.apply(initSaveState, context),
-                function(cb){
-                    asyncStopRecording(context, function(vData){
-                        savePerformanceDataQueue.push(createPerformanceSaveTask(
-                            context,
-                            context.currentPerformance,
-                            vData
-                        ),function(c,i){cb(null, c)})
-                    });
-                }
-            ], function(){
-                console.log("Stop recording callback triggered.");
-                refreshContext(context, callback); //both contexts should be the same, might want to change that
+            //stop recording performance
+            asyncStopRecording(context, function(videoData){
+                savePerformanceDataQueue.push(createPerformanceSaveTask(context,
+                    context.currentPerformance,
+                    videoData),
+                    function(c, i){
+                        updatePerformance(c, i);
+                        recordCb(c);
+                    }
+                )
             });
+            
+            initSaveState(context, stateCb);
         }
 
     }
@@ -663,8 +667,15 @@ CiteManager = (function(modules){
             if(!context.currentGame.isSingleFile){
                 options = {width: context.emu.canvas.width, height: context.emu.canvas.height, br: 300000};
             }
+            // startRecordingCalled is needed because initSaveState function will check for current performance.
+            // if there is a current performance, there is a chance for a race condition where the startRecording
+            // function callback will not finish before the creation of a new save state record
+            // in that case initSaveState will check if startRecordingCalled, if it is, then we are waiting for the
+            // start recording callback, meaning the state is at time_index 0 of the recording
+            context.startRecordingCalled = true;
             context.emu.startRecording(function(){
                 context.startedRecordingTime = Date.now();
+                context.startRecordingCalled = false;
                 callback(null, context)
             }, options);
         }else{
@@ -674,11 +685,12 @@ CiteManager = (function(modules){
 
     function asyncStopRecording(context, callback){
         if(context.emu.recording){
+            context.previousStartedRecordingTime = context.startedRecordingTime;
+            //  Needed to signal to saveState that it should look for the previous started time
+            context.hasFinishedRecording = true;
+            context.startedRecordingTime = 0;
+            
             context.emu.finishRecording(function(videoData){
-                context.previousStartedRecordingTime = context.startedRecordingTime;
-                //  Needed to signal to saveState that it should look for the previous started time
-                context.hasFinishedRecording = true;
-                context.startedRecordingTime = 0;
                 callback({buffer: videoData, compressed: false})
             });
         }else{
@@ -740,7 +752,6 @@ CiteManager = (function(modules){
             //Initiate emulator setup without recording
             CiteState.cite.apply(this, prepArgsForCiteState(context, null, options))
         }else{
-            startTiming('asyncRecording');
             CiteState.cite.apply(this, prepArgsForCiteState(context, callback, options))
         }
     }
@@ -857,8 +868,13 @@ CiteManager = (function(modules){
     }
 
     return {
+        // Direct exported functions are first (might move some of these to global scope?
+        jsonGameInfoURL: jsonGameInfoURL,
+        jsonPerformanceInfoURL: jsonPerformanceInfoURL,
+        jsonStateInfoURL: jsonStateInfoURL,
         initPageLoad: initPageLoad,
         createUIForContext: createUIForContext,
+        // Functions that relate to or interact with internal context information
         getNewContext: function(){
             return contextFactory.getNewContext();
         },
@@ -898,11 +914,51 @@ CiteManager = (function(modules){
         getContextById: function(id){
             return contextFactory.currentContexts()[id];
         },
-        startRecording: function(contextId, cb){
-            startRecording(this.getContextById(contextId), cb);
+        // recordCb is a callback for after recording has initialized,
+        // stateCb is a callback for the state save that happens when recording starts
+        // both callbacks return the context after being modified, be aware that since they are independent
+        // they do not have a guaranteed return order
+        startRecording: function(contextId, recordCb, stateCb){
+            startRecording(this.getContextById(contextId), recordCb, stateCb);
         },
-        stopRecording: function(contextId, cb){
-            stopRecording(this.getContextById(contextId), cb);
+        // recordCb is a callback for the completion of recording (after video has saved to server)
+        // stateCb is a callback for the state save of the terminal state when recording stopped
+        // both callbacks return the context after being modified, be aware that since they are independent
+        // they do not have a guaranteed return order
+        stopRecording: function(contextId, recordCb, stateCb){
+            stopRecording(this.getContextById(contextId), recordCb, stateCb);
+        },
+        updateCiteRecord: function(contextId, recordType, uuid, updateData, cb){
+            var ctx = this.getContextById(contextId);
+            if(!$.isEmptyObject(updateData)){
+                if(recordType === 'game'){
+                    $.post(updateGameRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
+                        asyncGetGameInfo(ctx, {record: JSON.parse(result)}, function(err, c, i){
+                            updateGame(ctx, i);
+                            cb(result);
+                        });
+                    });
+                }else if(recordType === 'performance'){
+                    $.post(updatePerformanceRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
+                        asyncGetGameInfo(ctx, {record: {uuid: JSON.parse(result).game_uuid }}, function(err, c, i){
+                            updateGame(ctx, i);
+                            cb(result);
+                        });
+                    });
+                }else if(recordType === 'state'){
+                    $.post(updateStateRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
+                        asyncGetGameInfo(ctx, {record: {uuid: result.game_uuid}}, function(err, c, i){
+                            updateGame(ctx, i);
+                            if(ctx.lastState && ctx.lastState.record.uuid === uuid){
+                                ctx.lastState.record = result;
+                            }
+                            cb(result);
+                        });
+                    });
+                }else{
+                    console.log("Need a valid record type to update a record!")
+                }
+            }
         }
     }
 

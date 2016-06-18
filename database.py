@@ -416,8 +416,8 @@ class DatabaseManager:
         if cls.is_attr_in_db('uuid', state_uuid, cls.GAME_SAVE_TABLE) and \
                 cls.is_attr_in_db('uuid', perf_uuid, cls.PERFORMANCE_CITATION_TABLE):
             cls.insert_into_table(cls.SAVE_STATE_PERFORMANCE_LINK_TABLE,
-                                  ['save_state_uuid', 'performance_uuid', 'time_index'],
-                                  [state_uuid, perf_uuid, time_index])
+                                  ['performance_uuid', 'save_state_uuid', 'time_index'],
+                                  [perf_uuid, state_uuid, time_index])
             return cls.retrieve_state_perf_link(state_uuid, perf_uuid)
         else:
             return None
