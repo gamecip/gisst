@@ -46,7 +46,7 @@ var UI = (function(){
      */
     function snakeToTitle(snakeCaseText){
         function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
-        return new Array(snakeCaseText.split("_").map(function(cv, i, a){ return i !== a.length -1 ? capitalize(cv) + " " : capitalize(cv)})).join().replace(/,/g, "");
+        return new Array(snakeCaseText.split("_").map(function(cv, i, a){ return i !== a.length - 1 ? capitalize(cv) + " " : capitalize(cv)})).join().replace(/,/g, "");
     }
 
     /*
@@ -84,21 +84,41 @@ var UI = (function(){
     };
 
     var stateListingStyle = {
-        width: "100%"
+        width: "100%",
+        height: "180px",
+        overflow: "scroll"
     };
 
     var stateItemStyle = {
         border: "solid 1px lightgray",
-        borderRadius: "5px"
+        borderRadius: "5px",
+        height: "55px"
     };
 
     var stateScreenStyle = {
-        width: "160px",
-        height: "100px"
+        width: "80px",
+        height: "50px",
+        border: "1px solid lightgrey"
+    };
+
+    var stateItemInfoStyle = {
+        fontFamily: "Georgia, serif",
+        fontSize: "14px",
+        marginLeft: "85px",
+        marginTop: "-50px"
     };
 
     var performanceListingStyle = {
-        width: "50%"
+        width: "100%",
+        height: "180px",
+        overflow: "scroll"
+    };
+
+    var performanceItemStyle = {
+        fontFamily: "Georgia, serif",
+        fontSize: "14px",
+        height: "30px",
+        border: "solid 1px lightgray"
     };
 
     var performanceReviewStyle = {
@@ -208,7 +228,7 @@ var UI = (function(){
             return (
                 React.createElement('div', {style: emulationAnalyzerStyle},
                     React.createElement('div', {style: {display: 'flex', flexFlow: 'row'}},
-                        React.DOM.h1({style: {width: "25%"}}, "Analyzer"),
+                        React.DOM.h3({style: {width: "25%"}}, React.DOM.a({href:'/citations'}, "Analyzer")),
                         React.createElement(StatusBar, {alerts: this.state.statusAlerts})
                     ),
                     React.createElement('div', {style: {display: 'flex', flexFlow: 'row'}},
@@ -223,7 +243,7 @@ var UI = (function(){
     var StatusBar = React.createClass({
         render: function(){
             return (
-                React.DOM.div({style:{width:"75%", border:'solid 1px blue', display:'flex', flexFlow:'row'}},
+                React.DOM.div({style:{height: "50px", width:"75%", border:'solid 1px blue', display:'flex', flexFlow:'row'}},
                     this.props.alerts.map(function(s, i, sa){
                         return React.createElement(StatusItem, {key: "status_" + s.id ,id: s.id, message: s.message });
                     })
@@ -250,7 +270,6 @@ var UI = (function(){
             var ctx = CiteManager.getContextById(this.props.contextId);
             state.availableStates = ctx.availableStates;
             state.availablePerformances = ctx.availablePerformances;
-
             return state;
         },
         dispatchStatusEvent: function(node, message, statusType){
@@ -268,7 +287,8 @@ var UI = (function(){
             });
 
             node.addEventListener('loadPrevious', function(e){
-                CiteManager.loadPreviousState(me.props.contextId, function(){
+                CiteManager.loadPreviousState(me.props.contextId, function(context){
+                    ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles':true, 'cancelable': true}))
                 })
             });
 
@@ -289,7 +309,9 @@ var UI = (function(){
                 CiteManager.stopRecording(me.props.contextId,
                     function(c){
                         me.dispatchStatusEvent(node, "Stop recording performance (complete): " + c.currentPerformance.record.uuid, STOP_RECORDING_COMPLETE_STATUS_EVENT);
-                        me.setState({availablePerformances: c.availablePerformances});},
+                        me.setState({availablePerformances: c.availablePerformances});
+                        ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles': true, 'cancelable': true}));
+                    },
                     function(err, c){//err needed due to return callback for initSaveState
                         me.setState({availableStates: c.availableStates})
                     })
@@ -322,7 +344,7 @@ var UI = (function(){
             });
         },
         componentWillReceiveProps: function(nextProps){
-            var ctx = CiteManager.getContextById(this.props.contextId);
+            var ctx = CiteManager.getContextById(nextProps.contextId);
             this.setState({availableStates: ctx.availableStates, availablePerformances: ctx.availablePerformances});
         },
         render: function (){
@@ -446,7 +468,7 @@ var UI = (function(){
         displayName: "StateItemInfo",
         render: function(){
             return (
-                React.DOM.div({}, this.props.record.description, this.props.record.uuid)
+                React.DOM.div({style: stateItemInfoStyle}, this.props.record.description + " " + this.props.record.uuid)
             )
         }
     });
@@ -467,12 +489,12 @@ var UI = (function(){
     var PerformanceItem = React.createClass({
         displayName: "PerformanceItem",
         perfSelectClick: function(){
-            ReactDOM.findDOMNode(this).dispatchEvent(new CustomEvent(PERF_SELECT_CLICK_EVENT, 
+            ReactDOM.findDOMNode(this).dispatchEvent(new CustomEvent(PERF_SELECT_CLICK_EVENT,
                 {detail: this.props.record.uuid, bubbles: "true", cancelable: "true"}))
         },
         render: function(){
             return (
-                React.DOM.div({onClick: this.perfSelectClick}, this.props.record.title, this.props.record.uuid)
+                React.DOM.div({style: performanceItemStyle, onClick: this.perfSelectClick}, this.props.record.title + " " + this.props.record.uuid)
             )
         }
     });
@@ -483,6 +505,7 @@ var UI = (function(){
     var TabPanel = ReactTabs.TabPanel;
 
     var TabComponent = React.createClass({
+        displayName: "TabComponent",
         getInitialState: function(){
             var ctx = CiteManager.getContextById(this.props.contextId);
             var state = {};
@@ -548,6 +571,7 @@ var UI = (function(){
     });
 
     var PerformanceReview = React.createClass({
+        displayName: "PerformanceReview",
         getInitialState: function(){
             return {linkedStates: []}
         },
@@ -556,8 +580,8 @@ var UI = (function(){
                 this.setState({linkedStates: result.linkedStates})
             }.bind(this))
         },
-        componentWillReceiveProps: function(){
-            $.get(CiteManager.jsonPerformanceInfoURL(this.props.id), function(result){
+        componentWillReceiveProps: function(nextProps){
+            $.get(CiteManager.jsonPerformanceInfoURL(nextProps.id), function(result){
                 this.setState({linkedStates: result.linkedStates})
             }.bind(this))
         },
@@ -574,6 +598,7 @@ var UI = (function(){
     });
 
     var InfoTable = React.createClass({
+        displayName: "InfoTable",
         getInitialState: function(){
             return {editable: false, formData: this.props.record}
         },
@@ -650,6 +675,7 @@ var UI = (function(){
     });
 
     var GameFileListing = React.createClass({
+        displayName: "GameFileListing",
         render: function (){
             var fi = this.props.fileInformation;
             var fi_keys;

@@ -170,7 +170,8 @@ class DatabaseManager:
         SAVE_STATE_PERFORMANCE_LINK_TABLE: [
             ('performance_uuid', 'text', field_constraint),
             ('save_state_uuid', 'text', field_constraint),
-            ('time_index', 'integer', field_constraint)
+            ('time_index', 'integer', field_constraint),
+            ('action', 'text', field_constraint) #    Action is "load" or "save"
         ],
         SCREENSHOT_LINK_TABLE: [
             ('performance_uuid', 'text', field_constraint),
@@ -412,12 +413,12 @@ class DatabaseManager:
         return cls.insert_into_table(cls.GAME_FILE_PATH_TABLE, cls.headers[cls.GAME_FILE_PATH_TABLE], new_values)
 
     @classmethod
-    def link_save_state_to_performance(cls, state_uuid, perf_uuid, time_index):
+    def link_save_state_to_performance(cls, state_uuid, perf_uuid, time_index, action):
         if cls.is_attr_in_db('uuid', state_uuid, cls.GAME_SAVE_TABLE) and \
                 cls.is_attr_in_db('uuid', perf_uuid, cls.PERFORMANCE_CITATION_TABLE):
             cls.insert_into_table(cls.SAVE_STATE_PERFORMANCE_LINK_TABLE,
-                                  ['performance_uuid', 'save_state_uuid', 'time_index'],
-                                  [perf_uuid, state_uuid, time_index])
+                                  ['performance_uuid', 'save_state_uuid', 'time_index', 'action'],
+                                  [perf_uuid, state_uuid, time_index, action])
             return cls.retrieve_state_perf_link(state_uuid, perf_uuid)
         else:
             return None
@@ -517,7 +518,8 @@ class DatabaseManager:
                                                    [perf_uuid],
                                                    cls.SAVE_STATE_PERFORMANCE_LINK_TABLE)
         link_info = [{'state_record': cls.retrieve_save_state(uuid=link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('save_state_uuid')])[0],
-                      'time_index': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('time_index')] } for link in links]
+                      'time_index': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('time_index')],
+                      'action': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('action')]} for link in links]
         return link_info
 
     #   For now returns list of dicts with relevant path information

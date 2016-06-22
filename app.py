@@ -261,10 +261,11 @@ def add_save_state(uuid):
     #   Attach performance information if present
     if performance_uuid:
         #   Sometimes a state maybe linked to a performance without a specific index?
+        #   Since we are adding a new state, it is always a state save action
         if performance_time_index:
-            dbm.link_save_state_to_performance(state_uuid, performance_uuid, performance_time_index)
+            dbm.link_save_state_to_performance(state_uuid, performance_uuid, performance_time_index, 'save')
         else:
-            dbm.link_save_state_to_performance(state_uuid, performance_uuid, 0)
+            dbm.link_save_state_to_performance(state_uuid, performance_uuid, 0, 'save')
 
     #   Retrieve save state information to get uuid and ignore blank fields
     save_state = dbm.retrieve_save_state(uuid=state_uuid)[0]
@@ -342,9 +343,11 @@ def update_save_state(uuid):
     if 'performance_uuid' in update_fields:
         performance_uuid = update_fields['performance_uuid']
         performance_time_index = update_fields['performance_time_index']
-        dbm.link_save_state_to_performance(uuid, performance_uuid, performance_time_index)
+        action = update_fields['action']
+        dbm.link_save_state_to_performance(uuid, performance_uuid, performance_time_index, action)
         del update_fields['performance_uuid']
         del update_fields['performance_time_index']
+        del update_fields['action']
 
     #   make sure that there are still fields to update
     if len(update_fields.keys()) > 0:
@@ -370,11 +373,8 @@ def game_update(uuid):
 
 @app.route("/performance/<uuid>/add", methods=['POST'])
 def performance_add(uuid):
-    game_ref = dbm.retrieve_game_ref(uuid)
-    title = request.form.get('title', 'A performance of {}'.format(game_ref['title']))
-    description = request.form.get('description')
-    perf_ref = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION,
-                                 game_uuid=uuid, title=title, description=description)
+    record = json.loads(request.form.get('record'))
+    perf_ref = generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, game_uuid=uuid, **record)
     dbm.add_to_citation_table(perf_ref, fts=True)
     return jsonify({'record': perf_ref.elements})
 
@@ -523,3 +523,7 @@ def send_file_partial(path):
 @app.route('/test-ui')
 def test_ui():
     return render_template('testui.html')
+
+@app.route('/custom_video_test')
+def custom_video_test():
+    return render_template('custom_video_test.html')

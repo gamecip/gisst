@@ -39,8 +39,8 @@ CiteManager = (function(modules){
         $.get(jsonGameInfoURL(info.record.uuid), "", function(info){ callback(null, context, info)} )
     }
 
-    function asyncGetPerformanceInfo(context, info, callback){
-        $.get(jsonPerformanceInfoURL(info.record.uuid), "", function(info){ callback(null, context, info)})
+    function asyncGetPerformanceInfo(uuid, callback){
+        $.get(jsonPerformanceInfoURL(uuid), "", function(info){ callback(info)})
     }
 
     //Record Creation
@@ -64,10 +64,9 @@ CiteManager = (function(modules){
             function(sInfo){ callback(null, context, sInfo)});
     }
 
-    function addPerformanceRecordAJAX(context, callback){
-        var title = "A performance of " + context.currentGame.record.title;
+    function addPerformanceRecordAJAX(context, record, callback){
         $.post(addPerformanceRecordURL(context.currentGame.record.uuid),
-            {title: title},
+            {record: JSON.stringify(record)},
             function(info){
                 callback(null, context, info)
             });
@@ -238,20 +237,6 @@ CiteManager = (function(modules){
         }
     })();
 
-    function refreshContext(context, cb){
-        async.parallel([
-            async.apply(asyncGetStateInfo, context, context.lastState),
-            async.apply(asyncGetPerformanceInfo, context, context.currentPerformance),
-            async.apply(asyncGetGameInfo, context, context.currentGame)
-        ], function(err, results){
-            updateState(context, results[0][1]);
-            updatePerformance(context, results[1][1]);
-            updateGame(context, results[2][1]);
-            cb(context)
-        })
-
-    }
-
     function updateState(context, info, data){
         if(!context.lastState) context.lastState = {};
         context.lastState.record = info.record;
@@ -280,8 +265,8 @@ CiteManager = (function(modules){
     function updatePerformance(context, info){
         if(!context.currentPerformance) context.currentPerformance = {};
         context.currentPerformance.record = info.record;
-        context.currentPerformance.linkedStates = info.linkedStates;
-        context.availablePerformances = info.availablePerformances;
+        context.currentPerformance.linkedStates = info.linkedStates ? info.linkedStates : [];
+        context.availablePerformances = info.availablePerformances ? info.availablePerformances : [];
     }
 
     //UCM-----UI CREATION AND MANAGEMENT---------
@@ -294,43 +279,18 @@ CiteManager = (function(modules){
 
     var saveStateDataQueue = async.queue(processSaveStateData, 2);
 
-    function initSaveState(context, callback){
+    function initSaveState(context, record, callback){
         var saveTimeInt = Date.now();
+        record.emulator = context.emu.emulator;
+        if(!record.description)
+            record.description = "State for " + context.currentGame.record.title + " at clock time: " + new Date(saveTimeInt).toUTCString();
+
         context.emu.saveState(function(stateData){
-            var record = {
-                emulator: context.emu.emulator
-            };
-
-            //Default description
-            record.description = "State for " + context.currentGame.record.title + " at " + new Date(saveTimeInt).toUTCString();
-
-            //Get state description
+            //Get state data description
             if(!context.currentGame.isSingleFile){
                 record.emt_stack_pointer = stateData.emtStack;
                 record.stack_pointer = stateData.stack;
                 record.time = stateData.time;
-            }
-
-            //Performance information and timing
-            if(context.currentPerformance){
-                record.performance_uuid = context.currentPerformance.record.uuid;
-                if(context.startRecordingCalled){
-                    record.performance_time_index = 0;
-                }else if(context.emu.recording){
-                    record.performance_time_index = saveTimeInt - context.startedRecordingTime;
-                }
-                //  Check to see if this is a state save terminal
-                if(context.hasFinishedRecording){
-                    record.performance_time_index = saveTimeInt - context.previousStartedRecordingTime;
-                    context.hasFinishedRecording = false;
-                }
-
-                if(!record.description){
-                    record.description += "State for performance: " + record.performance_uuid;
-                    if(record.performance_time_index) record.description += " at time: " + record.performance_time_index;
-                }else{
-                    record.description += " for performance: " + record.performance_uuid;
-                }
             }
 
             addStateRecordAJAX(context, {record: record},
@@ -399,7 +359,8 @@ CiteManager = (function(modules){
                 asyncSaveStateScreenData(task.info, task.screen, function(){
                     asyncGetStateInfo(task.context, task.info, function(e, c, i){
                         updateState(c, i, td);
-                        callback(null, c, i, td);
+                        if(callback)
+                            callback(null, c, i, td);
                     });
                 })
             });
@@ -413,14 +374,13 @@ CiteManager = (function(modules){
                     console.log("[SAVE STATE W]: Error with "+data.uuid+" "+data.message);
                 }else if(data.type === "finished"){
                     saveStateWorker.terminate();
-                    if(callback){
-                        asyncSaveStateScreenData(task.info, task.screen, function(){
-                            asyncGetStateInfo(task.context, task.info, function(e, c, i){
-                                updateState(c, i, data.data);
+                    asyncSaveStateScreenData(task.info, task.screen, function(){
+                        asyncGetStateInfo(task.context, task.info, function(e, c, i){
+                            updateState(c, i, data.data);
+                            if(callback)
                                 callback(null, c, i, data.data);
-                            });
-                        })
-                    }
+                        });
+                    })
                 }
             };
 
@@ -611,71 +571,17 @@ CiteManager = (function(modules){
 
     var savePerformanceDataQueue = async.queue(processPerformanceDataSave, 2);
 
-    function startRecording(context, recordCb, stateCb){
-        var tasks = [];
-        if(context.emu){
-            //start recording, save new initial state for performance
-            tasks.push(async.apply(asyncStartRecording, context));
-        }else{
-            //start emulation and recording
-            tasks.push(async.apply(asyncStartEmulationWithRecording, context));
-
-            if(context.lastState){
-                //save init state as performance initial if present
-                tasks.push(
-                    async.apply(asyncAddStateToPerformance, context, context.lastState.record)
-                );
-            }
-        }
-
-        addPerformanceRecordAJAX(context, function(err, context, info){
-            updatePerformance(context, info);
-            initSaveState(context, stateCb); //Save State does not need to be part of start recording call chain
-            async.series(tasks, function(){
-                //Update everything after you're finished
-                asyncGetPerformanceInfo(context, info, function(err, c, i){
-                    updatePerformance(c, i);
-                    recordCb(c);
-                })
-            });
-        });
-    }
-
-    function stopRecording(context, recordCb, stateCb){
-        if(context.emu.recording){
-            //stop recording performance
-            asyncStopRecording(context, function(videoData){
-                savePerformanceDataQueue.push(createPerformanceSaveTask(context,
-                    context.currentPerformance,
-                    videoData),
-                    function(c, i){
-                        updatePerformance(c, i);
-                        recordCb(c);
-                    }
-                )
-            });
-            
-            initSaveState(context, stateCb);
-        }
-
-    }
-
     function asyncStartRecording(context, callback){
+        console.log("RECORDING: " + context.emu.recording);
         if(!context.emu.recording){
             var options = {};
             //Used to reduce transcoding time for DOS at the moment
+            console.log("RECORDING WITH SIZE " + context.emu.canvas.width + " BY "+ context.emu.canvas.height);
             if(!context.currentGame.isSingleFile){
                 options = {width: context.emu.canvas.width, height: context.emu.canvas.height, br: 300000};
             }
-            // startRecordingCalled is needed because initSaveState function will check for current performance.
-            // if there is a current performance, there is a chance for a race condition where the startRecording
-            // function callback will not finish before the creation of a new save state record
-            // in that case initSaveState will check if startRecordingCalled, if it is, then we are waiting for the
-            // start recording callback, meaning the state is at time_index 0 of the recording
-            context.startRecordingCalled = true;
             context.emu.startRecording(function(){
-                context.startedRecordingTime = Date.now();
-                context.startRecordingCalled = false;
+                context.startedRecordingTime = Date.now(); //should this be before or after callback?
                 callback(null, context)
             }, options);
         }else{
@@ -684,22 +590,15 @@ CiteManager = (function(modules){
     }
 
     function asyncStopRecording(context, callback){
+        console.log("RECORDING WITH SIZE " + context.emu.canvas.width + " BY "+ context.emu.canvas.height);
         if(context.emu.recording){
-            context.previousStartedRecordingTime = context.startedRecordingTime;
-            //  Needed to signal to saveState that it should look for the previous started time
-            context.hasFinishedRecording = true;
             context.startedRecordingTime = 0;
-            
             context.emu.finishRecording(function(videoData){
                 callback({buffer: videoData, compressed: false})
             });
         }else{
             callback(new Error("Cannot stop recording on context "+context.id+" because it hasn't started"), context, {})
         }
-    }
-
-    function createPerformanceSaveTask(context, perfInfo, perfData){
-        return {context: context, info: perfInfo, data: perfData, uuid: perfInfo.record.uuid}
     }
 
     function processPerformanceDataSave(task, callback){
@@ -712,12 +611,9 @@ CiteManager = (function(modules){
                 console.log("Error with performance " + data.uuid + " " + data.message);
             }else if(data.type === "finished"){
                 console.log("Performance: " + data.uuid + " video save is complete.");
-                if(callback){
-                    asyncGetPerformanceInfo(task.context, task.info, function(err, c, i){
-                        callback(c, i)
-                    });
-                }
                 saveWorker.terminate();
+                if(callback)
+                    callback();
             }else if(data.type === "stdout"){
                 console.log(data.data);
             }
@@ -727,10 +623,6 @@ CiteManager = (function(modules){
             perfUUID: task.uuid,
             data: task.data
         });
-    }
-
-    function asyncAddStateToPerformance(context, stateInfo, callback){
-
     }
 
     //EMF---------EMULATION MANAGEMENT FUNCTIONS--------------
@@ -868,7 +760,7 @@ CiteManager = (function(modules){
     }
 
     return {
-        // Direct exported functions are first (might move some of these to global scope?
+        // Direct exported functions are first (might move some of these to global scope?)
         jsonGameInfoURL: jsonGameInfoURL,
         jsonPerformanceInfoURL: jsonPerformanceInfoURL,
         jsonStateInfoURL: jsonStateInfoURL,
@@ -892,12 +784,26 @@ CiteManager = (function(modules){
         },
         loadPreviousState: function(contextId, cb){
             var ctx = this.getContextById(contextId);
-            if(ctx.lastState){
+            if(!ctx.lastState){
+                cb(c)
+            }
+            if(ctx.emu.recording){
+                this.startNewPerformanceWhileRecording(contextId, ctx.lastState.record.uuid, cb);
+            }else{
+                //If we aren't recording a performance, just load the state
                 this.loadState(contextId, ctx.lastState.record.uuid, cb);
             }
         },
         saveState: function(contextId, cb){
-            initSaveState(this.getContextById(contextId), function(err, c, i, d){cb(c)});
+            var record = {};
+            var ctx = this.getContextById(contextId);
+            if(ctx.emu.recording){
+                var ti = Date.now() - ctx.startedRecordingTime;
+                record.performance_uuid = ctx.currentPerformance.record.uuid;
+                record.performance_time_index = ti;
+                record.description = "State for performance: " + i.record.uuid + " at time index:" + ti + " at clock time: " + new Date(Date.now()).toUTCString();
+            }
+            initSaveState(ctx, record, function(err, c, i, d){cb(c)});
         },
         loadState: function(contextId, uuid, cb){
             initLoadState(this.getContextById(contextId), uuid, cb);
@@ -914,19 +820,103 @@ CiteManager = (function(modules){
         getContextById: function(id){
             return contextFactory.currentContexts()[id];
         },
-        // recordCb is a callback for after recording has initialized,
-        // stateCb is a callback for the state save that happens when recording starts
-        // both callbacks return the context after being modified, be aware that since they are independent
-        // they do not have a guaranteed return order
-        startRecording: function(contextId, recordCb, stateCb){
-            startRecording(this.getContextById(contextId), recordCb, stateCb);
+        //All recording functions are repetitive and explicit because I kept confusing myself
+        //with order of operations
+
+        //Called to start a new performance on state load while recording
+        //Links loaded state as source for new performance, links old performance as
+        //derivative
+        startNewPerformanceWhileRecording: function(contextId, loadStateUUID, cb){
+            var oldPerformanceUUID = this.getContextById(contextId).currentPerformance.record.uuid;
+            var title = "A performance of: " + this.getContextById(contextId).currentGame.record.title;
+            //Create record for new performance
+            addPerformanceRecordAJAX(this.getContextById(contextId), {previous_performance_uuid: oldPerformanceUUID, title: title}, function(err, c, i){
+                var end_ti = Date.now() - c.startedRecordingTime;
+                var newPerformanceUUID = i.record.uuid;
+                var record = {
+                    performance_uuid: oldPerformanceUUID,
+                    performance_time_index: end_ti,
+                    description: "State for performance: " + oldPerformanceUUID + " at time index: " + end_ti + " at clock time: " + new Date(Date.now()).toUTCString(),
+                    action: 'save'
+                };
+
+                //Save state terminal
+                initSaveState(c, record);
+
+                //Update performance in context
+                updatePerformance(c, i);
+
+                //Stop current recording
+                asyncStopRecording(c, function(videoData){
+                    savePerformanceDataQueue.push({
+                        uuid: oldPerformanceUUID,
+                        data: videoData
+                    })
+                });
+
+                //Load incoming state
+                initLoadState(c, loadStateUUID, function(c, i, d){
+
+                    //Link start load as start of new performance
+                    this.updateCiteRecord(contextId, 'state', loadStateUUID,
+                        {
+                            performance_uuid: newPerformanceUUID,
+                            performance_time_index: 0,
+                            action: 'load'
+                        }
+                    );
+
+                    //Start next recording
+                    console.log("Calling after state load.");
+                    asyncStartRecording(c, function(err, c){
+                        cb(c);
+                    });
+                }.bind(this));
+            }.bind(this))
         },
-        // recordCb is a callback for the completion of recording (after video has saved to server)
-        // stateCb is a callback for the state save of the terminal state when recording stopped
-        // both callbacks return the context after being modified, be aware that since they are independent
-        // they do not have a guaranteed return order
+        startRecording: function(contextId, recordCb, stateCb){
+            addPerformanceRecordAJAX(this.getContextById(contextId), {title: "A performance of " + this.getContextById(contextId).currentGame.record.title}, function(err, c, i){
+                updatePerformance(c, i);
+                if(c.emu){
+                    var record = {
+                        performance_uuid: i.record.uuid,
+                        performance_time_index: 0,
+                        description: "State for performance: " + i.record.uuid + " at time index: 0 at clock time: " + new Date(Date.now()).toUTCString()
+                    };
+                    initSaveState(c, record, stateCb);
+                    asyncStartRecording(c, function(err, c){
+                        recordCb(c);
+                    })
+                }else{
+                    asyncStartEmulationWithRecording(c, function(err, c){
+                        recordCb(c);
+                    })
+                }
+            });
+        },
         stopRecording: function(contextId, recordCb, stateCb){
-            stopRecording(this.getContextById(contextId), recordCb, stateCb);
+            var ctx = this.getContextById(contextId);
+            var ti = Date.now() - ctx.startedRecordingTime;
+            var record = {
+                performance_uuid: ctx.currentPerformance.record.uuid,
+                performance_time_index: ti,
+                description: "State for performance: " + ctx.currentPerformance.record.uuid + " at time index: " + ti + "at clock time: " + new Date(Date.now()).toUTCString()
+            };
+            initSaveState(ctx, record, stateCb);
+
+            asyncStopRecording(ctx, function(videoData){
+                savePerformanceDataQueue.push({
+                    uuid: ctx.currentPerformance.record.uuid,
+                    data: videoData
+                }, function(){
+                    $.get(jsonPerformanceInfoURL(ctx.currentPerformance.record.uuid),
+                        function(i){
+                            updatePerformance(ctx, i);
+                            recordCb(ctx);
+                    })
+                })
+            });
+
         },
         updateCiteRecord: function(contextId, recordType, uuid, updateData, cb){
             var ctx = this.getContextById(contextId);
@@ -935,14 +925,16 @@ CiteManager = (function(modules){
                     $.post(updateGameRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
                         asyncGetGameInfo(ctx, {record: JSON.parse(result)}, function(err, c, i){
                             updateGame(ctx, i);
-                            cb(result);
+                            if(cb)
+                                cb(result);
                         });
                     });
                 }else if(recordType === 'performance'){
                     $.post(updatePerformanceRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
                         asyncGetGameInfo(ctx, {record: {uuid: JSON.parse(result).game_uuid }}, function(err, c, i){
                             updateGame(ctx, i);
-                            cb(result);
+                            if(cb)
+                                cb(result);
                         });
                     });
                 }else if(recordType === 'state'){
@@ -952,7 +944,8 @@ CiteManager = (function(modules){
                             if(ctx.lastState && ctx.lastState.record.uuid === uuid){
                                 ctx.lastState.record = result;
                             }
-                            cb(result);
+                            if(cb)
+                                cb(result);
                         });
                     });
                 }else{
