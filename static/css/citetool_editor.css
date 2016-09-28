@@ -1,0 +1,33 @@
+/* Citation Search Page */
+#search_text_box {
+    width: 75%;
+    margin-left: 12.5%;
+    height: 40px;
+    font-size: larger;
+    font-family: serif;
+}
+
+#search_submit_button {
+    display: block;
+    margin-top: 10px;
+    margin-left: 37.5%;
+}
+
+#search_select_radio_group {
+    margin-top: 10px;
+    margin-left: 25%;
+}
+
+#search_result_range_text {
+}
+
+#emulatorHolder {
+    height: 240px;
+    width: 256px
+}
+
+/* Play Page */
+#emulator {
+    height: 400px;
+    width: 640px;
+}

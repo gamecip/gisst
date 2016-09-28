@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Add a {{ cite_ref.ref_type }} citation</title>
+</head>
+<body>
+    <form action="{{ action_url }}" method="post">
+        {% for k,v in cite_ref.elements.items() %}
+        {{ k }}: <input type="text" name="{{ k }}" value="{{ v }}"><br>
+        {% endfor %}
+        <input type="submit" value="Submit Form">
+    </form>
+</body>
+</html>

@@ -25,9 +25,12 @@ source_uris = [
 
 source_exts = [
     ('\.fm2$', 'FCEUX Movie File', extractors.FM2Extractor),
+    ('\.smc$', 'SNES ROM File', extractors.SMCExtractor),
+    ('\.nes$', 'iNES ROM File', extractors.NESExtractor),
+    ('\.z64$', 'N64 ROM File', extractors.Z64Extractor),
     ('\.mp4$', 'MPEG-4 Movie File', extractors.GenericVideoExtractor),
     ('\.avi$', 'AVI Movie File', extractors.GenericVideoExtractor),
-    ('\.mov$', 'Quicktime Movie File', extractors.GenericVideoExtractor)
+    ('\.mov$', 'QuickTime Movie File', extractors.GenericVideoExtractor)
 ]
 
 def get_extractor_for_uri(uri, source):
@@ -46,6 +49,10 @@ def get_extractor_for_file(filepath):
     for search_file, _, extractor_class in source_exts:
         if re.search(search_file, filepath):
             return extractor_class(filepath)
+
+
+def get_extractor_for_directory(directory):
+    return extractors.DirectoryExtractor(directory)
 
 
 def get_file_source_name(filename):

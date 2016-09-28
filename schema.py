@@ -36,22 +36,23 @@ GAME_SCHEMA = {
     'version': {'0.1.0':
         {
             'elements': [
-                ('title',                {'required': True}),
-                ('uuid',                 {'required': True}),
-                ('platform',             {'required': False}),
-                ('developer',            {'required': False}),
-                ('publisher',            {'required': False}),
-                ('distributor',          {'required': False}),
-                ('copyright_year',       {'required': False}),
-                ('date_published',       {'required': False}),
-                ('localization_region',  {'required': False}),
-                ('version',              {'required': False}),
-                ('data_image_checksum',  {'required': False}),
-                ('data_image_source',    {'required': False}),
-                ('notes',                {'required': False}),
-                ('source_url',           {'required': False}),
-                ('source_data',          {'required': False}),
-                ('schema_version',       {'required': True,
+                ('title',                       {'required': True}),
+                ('uuid',                        {'required': True}),
+                ('platform',                    {'required': False}),
+                ('developer',                   {'required': False}),
+                ('publisher',                   {'required': False}),
+                ('distributor',                 {'required': False}),
+                ('copyright_year',              {'required': False}),
+                ('date_published',              {'required': False}),
+                ('localization_region',         {'required': False}),
+                ('version',                     {'required': False}),
+                ('data_image_checksum_type',    {'required': False}),
+                ('data_image_checksum',         {'required': False}),
+                ('data_image_source',           {'required': False}),
+                ('notes',                       {'required': False}),
+                ('source_url',                  {'required': False}),  # Source of citation information
+                ('source_data',                 {'required': False}),  # Data from source of citation information (documentation)
+                ('schema_version',              {'required': True,
                                           'default': '0.1.0'}),
             ]
         }
@@ -70,11 +71,8 @@ PERFORMANCE_SCHEMA = {
             ('data_events',                     {'required': False}),
             ('replay_source_purl',              {'required': False}),
             ('replay_source_file_ref',          {'required': False}),
+            ('replay_source_file_name',         {'required': False}),
             ('recording_agent',                 {'required': False}),
-            ('save_state_source_purl',          {'required': False}),
-            ('save_state_source_file_ref',      {'required': False}),
-            ('save_state_terminal_purl',        {'required': False}),
-            ('save_state_terminal_file_ref',    {'required': False}),
             ('emulator_name',                   {'required': False}),
             ('emulator_version',                {'required': False}),
             ('emulator_operating_system',       {'required': False}),
@@ -91,6 +89,7 @@ PERFORMANCE_SCHEMA = {
         ]
     }}
 }
+
 
 # Citation reference wrapper class
 class CiteRef(object):
@@ -124,6 +123,11 @@ class CiteRef(object):
             return tuple([v for e, v in self.elements.items() if e not in exclude])
         return tuple([v for v in self.elements.values()])
 
+    def get_element_items(self, exclude=None):
+        if exclude:
+            return zip(self.get_element_names(exclude), self.get_element_values(exclude))
+        return self.elements.items()
+
     def to_json_string(self):
         #   Convert datetimes to strings for json encoding
         json_dict = dict(map(lambda x: (x[0], x[1].isoformat()) if isinstance(x[1], datetime.datetime) else (x[0], x[1]),
@@ -131,7 +135,7 @@ class CiteRef(object):
         return json.dumps(json_dict)
 
     def to_pretty_string(self):
-        return "\n".join(["{} : {}".format(e, v) for e, v in self.elements.items()])
+        return u"\n".join([u"{} : {}".format(e, v) for e, v in self.elements.items()])
 
     def __repr__(self):
         return str(self.elements)

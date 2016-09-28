@@ -103,6 +103,6 @@ def bound_array(array, start_index=0, limit=None):
 
 
 def clean_for_sqlite_query(text):
-    puncs = (':', ',')
-    funcs = [lambda t, x=x: t.replace(x, '') for x in puncs]
+    puncs = (':', ',', '(', ')')
+    funcs = [lambda t, x=x: t.replace(x, ' ') for x in puncs]
     return reduce(lambda y, z: z(y), funcs, text)
