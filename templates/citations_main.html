@@ -2,42 +2,55 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="stylesheet" type="text/css" href="/static/css/citetool_editor.css">
     <title>Citations</title>
 </head>
 <body>
 <h2>Game Citations</h2>
-<table>
-    <tr>
-        {% for header in game_headers %}
-        <th>{{header}}</th>
+<table class="cite-table">
+    <tr class="cite-table-header-row">
+        {% for header in game_headers if header in ('title', 'platform', 'developer', 'publisher', 'copyright_year') %}
+            {% if header == 'title'%}
+            <th class="header-title">{{header.capitalize()}}</th>
+            {% else %}
+            <th class="cite-table-header">{{header.capitalize()}}</th>
+            {% endif %}
         {% endfor %}
     </tr>
     {% for game in all_game_cites %}
-        <tr>
-            {% for k, v in game.elements.items() %}
-                {% if k == 'uuid'%}
-                    <td><a href="/citation/{{v}}">{{v}}</a></td>
+        <tr class="cite-table-row">
+            {% for k, v in game.elements.items() if k in ('title', 'platform', 'developer', 'publisher', 'copyright_year') %}
+                {% if k == 'title'%}
+                    <td class="cite-table-data"><a href="/citation/{{game.elements['uuid']}}">{{v}}</a></td>
                 {% else %}
-                    <td>{{v}}</td>
+                    <td class="cite-table-data">{{v}}</td>
                 {% endif %}
             {% endfor %}
         </tr>
     {% endfor %}
 </table>
 <h2>Performance Citations</h2>
-<table>
-    <tr>
-        {% for header in perf_headers %}
-        <th>{{header}}</th>
+<table class="cite-table">
+    <tr class="cite-table-header-row">
+        {% for header in perf_headers if header in ('title', 'description', 'game_uuid', 'uuid')%}
+            {% if header == 'uuid' or header == 'game_uuid'%}
+            <th class="header-uuid">{{header.upper()}}</th>
+            {% elif header == 'title'%}
+            <th class="header-title">{{header.capitalize()}}</th>
+            {% elif header == 'description'%}
+            <th class="header-description">{{header.capitalize()}}</th>
+            {% else %}
+            <th class="cite-table-header">{{header.capitalize()}}</th>
+            {% endif %}
         {% endfor %}
     </tr>
     {% for perf in all_perf_cites %}
-    <tr>
-        {% for k, v in perf.elements.items() %}
-            {% if k == 'uuid'%}
-                <td><a href="/citation/{{v}}">{{v}}</a></td>
+    <tr class="cite-table-row">
+        {% for k, v in perf.elements.items() if k in ('title', 'description', 'game_uuid', 'uuid') %}
+            {% if k == 'uuid' or k == 'game_uuid' %}
+            <td class="cite-table-data table-uuid"><a href="/citation/{{v}}">{{v}}</a></td>
             {% else %}
-                <td>{{v}}</td>
+            <td class="cite-table-data">{{v}}</td>
             {% endif %}
         {% endfor %}
     </tr>

@@ -206,6 +206,9 @@ def add_extra_file(uuid):
     decoded_b64 = base64.b64decode(extra_file_b64)
     extra_b_array = bytearray(decoded_b64)
 
+    main_executable = True if main_executable == 'true' else False
+    is_executable = True if is_executable == 'true' else False
+
     if len(extra_b_array) != data_length:
         extra_b_array.extend([0 for _ in range(len(extra_b_array), data_length)])
 
@@ -218,7 +221,9 @@ def add_extra_file(uuid):
     file_id = dbm.check_for_existing_file(rel_file_path, hash_check)
     if file_id:
         dbm.link_existing_file_to_save_state(uuid, file_id)
+        print "File {}:{} found.".format(file_name, rel_file_path)
     else:
+        print "File {}:{} created.".format(file_name, rel_file_path)
         source_data_hash, file_name = save_byte_array_to_store(extra_b_array,
                                                                file_name=file_name,
                                                                store_path=LOCAL_GAME_DATA_STORE)
@@ -252,7 +257,7 @@ def add_save_state(uuid):
         emulator_version=request.form.get('emulator_version'),
         emt_stack_pointer=request.form.get('emt_stack_pointer'),
         stack_pointer=request.form.get('stack_pointer'),
-        system_time=request.form.get('time'),
+        time=request.form.get('time'),
         created_on=None,
         created=datetime.datetime.now()
     )

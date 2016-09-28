@@ -54,11 +54,9 @@ var UI = (function(){
     * */
 
     var emulationAnalyzerStyle = {
-        display: 'flex',
-        flexFlow: 'column',
         border: 'solid 1px red',
-        width: '100%',
-        height: '100%'
+        width: '1300px',
+        height: '800px'
 
     };
 
@@ -95,10 +93,18 @@ var UI = (function(){
         height: "55px"
     };
 
+    var selectedStateItemStyle = {
+        border: "solid 1px lightgray",
+        borderRadius: "5px",
+        height: "55px",
+        color: "white",
+        backgroundColor: "lightgray"
+    };
+
     var stateScreenStyle = {
         width: "80px",
         height: "50px",
-        border: "1px solid lightgrey"
+        border: "1px solid lightgray"
     };
 
     var stateItemInfoStyle = {
@@ -119,6 +125,20 @@ var UI = (function(){
         fontSize: "14px",
         height: "30px",
         border: "solid 1px lightgray"
+    };
+
+    var selectedPerformanceItemStyle = {
+        fontFamily: "Georgia, serif",
+        fontSize: "14px",
+        height: "30px",
+        border: "solid 1px lightgray",
+        color: "white",
+        backgroundColor: "lightgray"
+    };
+
+    var gameFileListingStyle = {
+        overflow: "scroll",
+        height: "450px"
     };
 
     var performanceReviewStyle = {
@@ -164,11 +184,17 @@ var UI = (function(){
     var EmulationAnalyzer = React.createClass({
         getInitialState: function (){
             var alerts = [];
+            var state = {
+                update: false,
+                statusAlerts: alerts,
+                statusCounter: 0
+            };
             var ctx = CiteManager.getContextById(this.props.contextId);
             if(ctx.lastState){
-                alerts.push({statusType: GENERAL_STATUS_ALERT_EVENT, message: "Preloaded: " + ctx.lastState.record.description})
+                alerts.push({statusType: GENERAL_STATUS_ALERT_EVENT, message: "Preloaded: " + ctx.lastState.record.description});
+                state.selectedState = ctx.lastState.record.uuid;
             }
-            return {update: false, statusAlerts: alerts, statusCounter: 0}
+            return state;
         },
         componentDidMount: function(){
             var me = this;
@@ -180,6 +206,10 @@ var UI = (function(){
 
             node.addEventListener(PERF_SELECT_CLICK_EVENT, function(e){
                 me.setState({selectedPerformance: e.detail});
+            });
+
+            node.addEventListener(STATE_SELECT_CLICK_EVENT, function(e){
+                me.setState({selectedState: e.detail});
             });
 
             node.addEventListener(ADD_STATUS_ALERT_EVENT, function(e){
@@ -232,8 +262,8 @@ var UI = (function(){
                         React.createElement(StatusBar, {alerts: this.state.statusAlerts})
                     ),
                     React.createElement('div', {style: {display: 'flex', flexFlow: 'row'}},
-                        React.createElement(EmulationComponent, {contextId: this.props.contextId}),
-                        React.createElement(TabComponent, {contextId: this.props.contextId, selectedPerformance: this.state.selectedPerformance })
+                        React.createElement(EmulationComponent, {contextId: this.props.contextId, selectedState: this.state.selectedState, selectedPerformance: this.state.selectedPerformance}),
+                        React.createElement(TabComponent, {contextId: this.props.contextId, selectedPerformance: this.state.selectedPerformance})
                     )
                 )
             )
@@ -264,7 +294,7 @@ var UI = (function(){
         getInitialState: function(){
             var state = {
                 startedEmulation: false,
-                startedRecording: false,
+                isRecording: false,
                 muted: false
             };
             var ctx = CiteManager.getContextById(this.props.contextId);
@@ -296,7 +326,7 @@ var UI = (function(){
                 CiteManager.startRecording(me.props.contextId, function(c){
                     me.dispatchStatusEvent(node, "Started recording performance: " + c.currentPerformance.record.uuid, START_RECORDING_STATUS_EVENT);
                 }, function(err, c){ //err needed due to return callback for initSaveState
-                    me.setState({availableStates: c.availableStates})
+                    me.setState({availableStates: c.availableStates, isRecording: c.emu.recording})
                 })
             });
 
@@ -309,7 +339,7 @@ var UI = (function(){
                 CiteManager.stopRecording(me.props.contextId,
                     function(c){
                         me.dispatchStatusEvent(node, "Stop recording performance (complete): " + c.currentPerformance.record.uuid, STOP_RECORDING_COMPLETE_STATUS_EVENT);
-                        me.setState({availablePerformances: c.availablePerformances});
+                        me.setState({availablePerformances: c.availablePerformances, isRecording: c.emu.recording});
                         ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles': true, 'cancelable': true}));
                     },
                     function(err, c){//err needed due to return callback for initSaveState
@@ -339,6 +369,7 @@ var UI = (function(){
 
             node.addEventListener(STATE_SELECT_START_CLICK_EVENT, function(e){
                 CiteManager.startEmulationWithState(me.props.contextId, e.detail, function(context){
+                    me.setState({availableStates: context.availableStates, startedEmulation: true});
                     ReactDOM.findDOMNode(me).dispatchEvent(new Event(CONTEXT_UPDATE_EVENT, {'bubbles': true, 'cancelable': true}))
                 })
             });
@@ -353,7 +384,7 @@ var UI = (function(){
                     React.createElement(EmulationContainer, {id: this.props.contextId + "_emulationContainer"}),
                     React.createElement(EmulationControls, {
                         started: this.state.startedEmulation,
-                        recording: this.state.startedRecording,
+                        recording: this.state.isRecording,
                         muted: this.state.muted
                     }),
                     React.createElement('div', {style:{width:"100%"}},
@@ -363,10 +394,10 @@ var UI = (function(){
                                 React.createElement(Tab, {}, "Available Performances")
                             ),
                             React.createElement(TabPanel, {},
-                                React.createElement(StateListing, {started: this.state.startedEmulation, availableStates: this.state.availableStates})
+                                React.createElement(StateListing, {started: this.state.startedEmulation, selectedState: this.props.selectedState, availableStates: this.state.availableStates})
                             ),
                             React.createElement(TabPanel, {},
-                                React.createElement(PerformanceListing, {availablePerformances: this.state.availablePerformances})
+                                React.createElement(PerformanceListing, {availablePerformances: this.state.availablePerformances, selectedPerformance: this.props.selectedPerformance})
                             )
                         )
                     )
@@ -422,12 +453,11 @@ var UI = (function(){
     var StateListing = React.createClass({
         displayName: "StateListing",
         render: function (){
-            var me = this;
             return (
                 React.DOM.div({style:stateListingStyle},
                     this.props.availableStates.map(function(s){
-                        return React.createElement(StateItem, {key:'StateItem_' + s.uuid,record: s, started: me.props.started})
-                    })
+                        return React.createElement(StateItem, {key:'StateItem_' + s.uuid,record: s, started: this.props.started, selected: this.props.selectedState === s.uuid })
+                    }.bind(this))
                 )
             )
         }
@@ -447,7 +477,7 @@ var UI = (function(){
         render: function (){
             var screenURL = "/cite_data/" + this.props.record.uuid + "/screen_" + this.props.record.uuid + ".png";
             return (
-                React.DOM.div({style:stateItemStyle, onClick: this.stateSelectClick},
+                React.DOM.div({style: this.props.selected ? selectedStateItemStyle : stateItemStyle, onClick: this.stateSelectClick},
                     React.createElement(StateScreenShot, {screenURL: screenURL}),
                     React.createElement(StateItemInfo, {record: this.props.record})
                 )
@@ -479,8 +509,8 @@ var UI = (function(){
             return (
                 React.DOM.div({style:performanceListingStyle},
                     this.props.availablePerformances.map(function(s){
-                        return React.createElement(PerformanceItem, {key:'PerformanceItem_' + s.uuid, record: s})
-                    })
+                        return React.createElement(PerformanceItem, {key:'PerformanceItem_' + s.uuid, record: s, selected: this.props.selectedPerformance === s.uuid })
+                    }.bind(this))
                 )
             )
         }
@@ -494,7 +524,7 @@ var UI = (function(){
         },
         render: function(){
             return (
-                React.DOM.div({style: performanceItemStyle, onClick: this.perfSelectClick}, this.props.record.title + " " + this.props.record.uuid)
+                React.DOM.div({style: this.props.selected ? selectedPerformanceItemStyle : performanceItemStyle, onClick: this.perfSelectClick}, this.props.record.title + " " + this.props.record.uuid)
             )
         }
     });
@@ -685,7 +715,7 @@ var UI = (function(){
                 fi_keys = [];
             }
             return (
-                React.DOM.ul({}, fi_keys.map(function(fi_key){
+                React.DOM.ul({style:gameFileListingStyle}, fi_keys.map(function(fi_key){
                     var key = fi_key + "_" + fi[fi_key].game_uuid;
                     return React.DOM.li({key:key}, fi_key)
                 }))

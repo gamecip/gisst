@@ -287,19 +287,19 @@ CiteManager = (function(modules){
 
         context.emu.saveState(function(stateData){
             //Get state data description
-            if(!context.currentGame.isSingleFile){
-                record.emt_stack_pointer = stateData.emtStack;
+            if(context.emu.usesHeapSave){
+                if(context.emu.emterpreted)
+                    record.emt_stack_pointer = stateData.emtStack;
                 record.stack_pointer = stateData.stack;
                 record.time = stateData.time;
             }
 
             addStateRecordAJAX(context, {record: record},
                 function(err, context, info){
-                    if(context.currentGame.isSingleFile){
+                    if(!context.emu.usesHeapSave){
                         saveStateDataQueue.push(createSaveStateDataTask(context,
                             info,
                             {buffer: stateData, compressed: false},
-                            SINGULAR_STATE,
                             CiteState.canvasCaptureScreen(context.emu)
                         ), callback)
                     }else{
@@ -312,7 +312,6 @@ CiteManager = (function(modules){
                                 stack: stateData.stack,
                                 time: stateData.time
                             },
-                            DEPENDENT_STATE,
                             CiteState.canvasCaptureScreen(context.emu)
                         ), callback)
                     }
@@ -321,9 +320,9 @@ CiteManager = (function(modules){
     }
 
     //State Save Task Factory Functions (just to make sure task object is consistent)
-    function createSaveStateDataTask(context, gameInfo, stateData, stateType, screenData){
+    function createSaveStateDataTask(context, gameInfo, stateData, screenData){
         //might add stateInfo as parameter if more complementary information is needed
-        return {context: context, info: gameInfo, data: stateData, type: stateType, screen: screenData}
+        return {context: context, info: gameInfo, data: stateData, screen: screenData}
     }
 
     function asyncSaveStateData(info, data, callback){
@@ -351,20 +350,8 @@ CiteManager = (function(modules){
 
     //Manage the compression and uploading of save state data
     function processSaveStateData(task, callback){
-        var tasks;
         //Single save states do not need worker since low overhead
-        if(task.type === SINGULAR_STATE){
-            asyncSaveStateData(task.info, task.data, function(err, ti, td){
-                if(err) console.log("Error with state save of " + task.info.record.uuid);
-                asyncSaveStateScreenData(task.info, task.screen, function(){
-                    asyncGetStateInfo(task.context, task.info, function(e, c, i){
-                        updateState(c, i, td);
-                        if(callback)
-                            callback(null, c, i, td);
-                    });
-                })
-            });
-        }else if(task.type === DEPENDENT_STATE){
+        if(task.context.emu.usesHeapSave){
             var saveStateWorker = new Worker("/static/js/save-state-worker.js");
             saveStateWorker.onmessage = function(e){
                 var data = e.data;
@@ -384,24 +371,47 @@ CiteManager = (function(modules){
                 }
             };
 
-            var fi;
-            if(task.context.lastState){
-                fi = task.context.lastState.fileInformation;
-            }else{
-                fi = task.context.currentGame.fileInformation;
-            }
-            task.context.emu.saveExtraFiles(task.context.emu.listExtraFiles(),
-                function(fm){
-                    runLengthCompressByteArray(task.data, function(err, d){
-                        saveStateWorker.postMessage({
-                            data: d,
-                            fileMapping: fm,
-                            fileInformation: fi,
-                            uuid: task.info.record.uuid
+            if(task.context.emu.hasFileSystem){
+                var fi;
+                if(task.context.lastState){
+                    fi = task.context.lastState.fileInformation;
+                }else{
+                    fi = task.context.currentGame.fileInformation;
+                }
+                task.context.emu.saveExtraFiles(task.context.emu.listExtraFiles(),
+                    function(fm){
+                        runLengthCompressByteArray(task.data, function(err, d){
+                            saveStateWorker.postMessage({
+                                data: d,
+                                fileMapping: fm,
+                                fileInformation: fi,
+                                uuid: task.info.record.uuid
+                            });
                         });
                     });
-                });
 
+            }else{
+                runLengthCompressByteArray(task.data, function(err, d){
+                    saveStateWorker.postMessage({
+                        data: d,
+                        fileMapping: null,
+                        fileInformation: null,
+                        uuid: task.info.record.uuid
+                    })
+                });
+            }
+            //uses built-in save state
+        }else {
+            asyncSaveStateData(task.info, task.data, function(err, ti, td){
+                if(err) console.log("Error with state save of " + task.info.record.uuid);
+                asyncSaveStateScreenData(task.info, task.screen, function(){
+                    asyncGetStateInfo(task.context, task.info, function(e, c, i){
+                        updateState(c, i, td);
+                        if(callback)
+                            callback(null, c, i, td);
+                    });
+                })
+            });
         }
     }
 
@@ -415,7 +425,7 @@ CiteManager = (function(modules){
         //TODO: Clean this up if runLength actually works
         function prepLoadState(err, c, i, d){
             var dataToLoad = {};
-            if(context.currentGame.isSingleFile){
+            if(!context.emu.usesHeapSave){
                 dataToLoad = d.buffer;
             } else{
                 dataToLoad.heap = d.buffer;
@@ -476,7 +486,7 @@ CiteManager = (function(modules){
 
     function loadStateFromServer(task, callback){
         preLoadStateFromServer(task, function(err, context, info, data){
-            if(!task.context.currentGame.isSingleFile){
+            if(task.context.emu.usesHeapSave){
                 data.emtStack = info.record.emt_stack_pointer;
                 data.stack = info.record.stack_pointer;
                 data.time = info.record.time;
@@ -501,7 +511,7 @@ CiteManager = (function(modules){
         function prepForStartEmulation(err, c, i, d){
             //Need new dataObject so that cache is correct
             var dataToLoad = {};
-            if(!c.currentGame.isSingleFile){
+            if(!c.emu.usesHeapSave){
                 dataToLoad.heap = d.buffer;
                 dataToLoad.emtStack = d.emtStack = info.record.emt_stack_pointer;
                 dataToLoad.time = d.time = info.record.time;
@@ -575,11 +585,6 @@ CiteManager = (function(modules){
         console.log("RECORDING: " + context.emu.recording);
         if(!context.emu.recording){
             var options = {};
-            //Used to reduce transcoding time for DOS at the moment
-            console.log("RECORDING WITH SIZE " + context.emu.canvas.width + " BY "+ context.emu.canvas.height);
-            if(!context.currentGame.isSingleFile){
-                options = {width: context.emu.canvas.width, height: context.emu.canvas.height, br: 300000};
-            }
             context.emu.startRecording(function(){
                 context.startedRecordingTime = Date.now(); //should this be before or after callback?
                 callback(null, context)
@@ -590,7 +595,6 @@ CiteManager = (function(modules){
     }
 
     function asyncStopRecording(context, callback){
-        console.log("RECORDING WITH SIZE " + context.emu.canvas.width + " BY "+ context.emu.canvas.height);
         if(context.emu.recording){
             context.startedRecordingTime = 0;
             context.emu.finishRecording(function(videoData){
@@ -633,8 +637,7 @@ CiteManager = (function(modules){
 
     function asyncStartEmulationWithRecording(context, callback){
         var options = {mute: false, recorder:{autoStart: true}};
-        //TODO: change from isSingleFile to requiresSDL2, since there may be SDL2 applications that are single file
-        if(!context.currentGame.isSingleFile){
+        if(context.emu.requiresSDL2){
             //Add callback to start recording once SDL context is loaded
             //if necessary
             triggerOnSDL2Available(context, function (context, timestamp){
@@ -662,9 +665,9 @@ CiteManager = (function(modules){
             null  //blank unless dependent files
             //options are next argument if needed
         ];
-        var single = context.currentGame.isSingleFile;
+        var hasFileSystem = context.emu.hasFileSystem;
         if(context.lastState){
-            if(single){
+            if(hasFileSystem){
                 args[3] = context.lastState.data;
             }else{
                 args[4] = context.lastState.data;
@@ -687,7 +690,7 @@ CiteManager = (function(modules){
     //hack to check when the audio node is ready to record and callback (mostly for autostart recording in DOSBOX)
     var checkSDL2Req = window.requestAnimationFrame(checkSDL2);
     var SDL2Callbacks = [];
-
+    
     function checkSDL2(timestamp){
         if(window["SDL2"]){
             window.cancelAnimationFrame(checkSDL2Req);
@@ -702,7 +705,7 @@ CiteManager = (function(modules){
             checkSDL2Req = window.requestAnimationFrame(checkSDL2);
         }
     }
-
+    
     function triggerOnSDL2Available(context, cb){
         SDL2Callbacks.push({context:context, cb:cb})
     }
@@ -900,7 +903,7 @@ CiteManager = (function(modules){
             var record = {
                 performance_uuid: ctx.currentPerformance.record.uuid,
                 performance_time_index: ti,
-                description: "State for performance: " + ctx.currentPerformance.record.uuid + " at time index: " + ti + "at clock time: " + new Date(Date.now()).toUTCString()
+                description: "State for performance: " + ctx.currentPerformance.record.uuid + " at time index: " + ti + " at clock time: " + new Date(Date.now()).toUTCString()
             };
             initSaveState(ctx, record, stateCb);
 

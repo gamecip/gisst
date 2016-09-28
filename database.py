@@ -62,8 +62,6 @@ class DatabaseManager:
     GAME_SAVE_TABLE = 'game_save_table'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     SAVE_STATE_PERFORMANCE_LINK_TABLE = 'save_state_performance_link_table'
-    FILE_PATH_SAVE_STATE_LINK_TABLE = 'file_path_save_state_link_table'
-    SCREENSHOT_LINK_TABLE = 'screenshot_link_table'
     FTS_INDEX_TABLE = 'fts_index_table'
     FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
 
@@ -172,10 +170,6 @@ class DatabaseManager:
             ('save_state_uuid', 'text', field_constraint),
             ('time_index', 'integer', field_constraint),
             ('action', 'text', field_constraint) #    Action is "load" or "save"
-        ],
-        SCREENSHOT_LINK_TABLE: [
-            ('performance_uuid', 'text', field_constraint),
-            ('time_index', 'text', field_constraint)
         ]
     }
 
@@ -236,7 +230,9 @@ class DatabaseManager:
 
     @classmethod
     def insert_into_table(cls, table_name, keys, values):
-        query = 'insert into {} values ({})'.format(table_name, ",".join([':{}'.format(k) for k in keys]))
+        query = 'insert into {}({}) values ({})'.format(table_name, #table to insert into
+                                                         ",".join([k for k in keys]), #columns in table
+                                                         ",".join([':{}'.format(k) for k in keys])) #mapping of columns ids to placeholder assignments for values
         return cls.run_query(query, dict(zip(keys,values)))
 
     @classmethod
@@ -247,6 +243,11 @@ class DatabaseManager:
                                dict(zip(chain(fields, where_fields),chain(values, where_values))))
         return result
 
+    @classmethod
+    def delete_from_table(cls, table_name, fields, values, relation=AND):
+        where_clause = cls.get_where_clause(fields, values, relation)
+        result = cls.run_query(r'delete_from {} where {}'.format(table_name, where_clause), dict(zip(fields, values)))
+        return result
 
     @classmethod
     def run_query(cls, query, parameters=None, commit=True, many=False):
@@ -366,9 +367,9 @@ class DatabaseManager:
         values.append(fields.get('emulator_name'))
         values.append(fields.get('emulator_version'))
         values.append(fields.get('emt_stack_pointer'))
-        values.append(fields.get('has_screen'))
         values.append(fields.get('stack_pointer'))
-        values.append(fields.get('system_time'))
+        values.append(fields.get('time'))
+        values.append(fields.get('has_screen'))
         values.append(fields.get('created_on'))
         values.append(fields.get('created'))
         result = cls.insert_into_table(table, cls.headers[table], values)

@@ -31,3 +31,69 @@
     height: 400px;
     width: 640px;
 }
+
+/* Citation Listing Page */
+.cite-table {
+    border: solid gray 1px;
+    table-layout: fixed;
+}
+
+.cite-table-header {
+    color: white;
+    background-color: gray;
+    overflow: hidden;
+}
+
+.cite-table-header-row {
+
+}
+
+.cite-table-row {
+
+}
+
+.cite-table-data {
+
+}
+
+.header-title {
+    color: white;
+    background-color: gray;
+}
+.header-uuid {
+    color: white;
+    background-color: gray;
+    width: 300px;
+}
+
+.header-description{
+    color: white;
+    background-color: gray;
+    width: 300px;
+}
+
+.table-uuid {
+    overflow: hidden;
+    width: 300px;
+}
+
+table{
+    border: 1px solid black;
+    table-layout: fixed;
+    width: 100%;
+}
+
+th {
+    text-align: center;
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+td {
+    text-align: left;
+    padding: 3px;
+}
+
+th, td {
+    overflow: hidden;
+}
