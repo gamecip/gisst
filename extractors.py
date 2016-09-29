@@ -835,6 +835,11 @@ class SMCExtractor(Extractor):
                'DAT info')
 
     def extract(self, options=None):
+        try:
+            subprocess.call('ucon64')
+        except OSError:
+            return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
+        
         full_path = pipes.quote(os.path.abspath(self.source))
 
         #   Prep Ucon64 and parse Ucon64 output
@@ -880,6 +885,11 @@ class NESExtractor(Extractor):
                'Date', 'Checksum (CRC32)', 'DAT info')
 
     def extract(self, options=None):
+        try:
+            subprocess.call('ucon64')
+        except OSError:
+            return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
+
         full_path = pipes.quote(os.path.abspath(self.source))
 
         #   Prep Ucon64 and parse Ucon64 output
@@ -927,6 +937,11 @@ class Z64Extractor(Extractor):
                )
 
     def extract(self, options=None):
+        try:
+            subprocess.call('ucon64')
+        except OSError:
+            return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
+
         full_path = pipes.quote(os.path.abspath(self.source))
 
         proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)

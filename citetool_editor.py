@@ -51,6 +51,13 @@ def cli(ctx, verbose, no_prompts):
     ctx.obj = dict()    # Context object that stores application state in dict, could make class at some point
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['NO_PROMPTS'] = no_prompts
+
+    #   Check for ucon64
+    try:
+        subprocess.call("ucon64")
+    except OSError:
+        click.echo("WARNING: ucon64 not installed. Required for NES, SNES and N64 rom info.")
+
     #   Check for data root
     if not os.path.exists(LOCAL_DATA_ROOT):
         click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
@@ -119,7 +126,11 @@ def extract_uri(ctx, uri):
 
     cond_print(verbose, 'Extracting URI...')
     # These are separate since file downloads might rely on subprocesses
-    extractor.extract()
+    try:
+        extractor.extract()
+    except ExtractorError as e:
+        click.echo(e.message)
+        sys.exit(1)
 
     # Block until extraction complete, needed for anything requiring sub-processes
     while not extractor.extracted_info:
@@ -265,7 +276,11 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
     #   FILE PATH citation
     if file_path:
         extractor = get_extractor_for_file(os.path.expanduser(file_path))
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
         citation, extracted_options = extractor.create_citation()
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
@@ -299,7 +314,11 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
             alternate_citation = choose_citation(search_locally_with_citation(citation))
 
         #   Extract all the files and paths
-        extractor.extract(options=options)
+        try:
+            extractor.extract(options=options)
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
 
         #   Add file_paths to game data store if this is a new citation
         file_info = extractor.extracted_info['file_info']
@@ -321,7 +340,11 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
             sys.exit(1)
 
         extractor = get_extractor_for_uri(url, source)
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
         # Block if this is a link to a video or other extractor process
         while not extractor.extracted_info:
             pass
@@ -405,7 +428,11 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
 
     if file_path:
         extractor = get_extractor_for_file(os.path.expanduser(file_path))
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
         citation, extracted_options = extractor.create_citation()
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
@@ -416,8 +443,14 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
         except SourceError as e:
             click.echo(e.message)
             sys.exit(1)
+
         extractor = get_extractor_for_uri(url, source)
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
+
         #   Block while waiting for extraction to finish, necessary for video downloads
         while not extractor.extracted_info:
             pass
