@@ -808,7 +808,7 @@ def parse_ucon64_output(ucon64_buffer, headers, rom_source_index, info_start_ind
             elif index == info_start_index + 2: parse_data['publisher'] = line.strip()
             elif index == info_start_index + 3: parse_data['localization_region'] = line.strip()
             elif index == info_start_index + 4: parse_data['rom_size'] = line.strip()
-        else:           # in header lines or .dat file description
+        elif len(line.strip()) > 0:           # in header lines or .dat file description
             key, value = line.split(':') if not in_dat_info else (None, None)
             if key in headers:
                 # Check if in DAT info at end of file
@@ -836,10 +836,12 @@ class SMCExtractor(Extractor):
 
     def extract(self, options=None):
         try:
-            subprocess.call('ucon64')
-        except OSError:
-            return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
-        
+            devnull = open(os.devnull)
+            subprocess.Popen(['ucon64'], stdout=devnull, stderr=devnull).communicate()
+        except OSError as e:
+            if e.errno == os.errno.ENOENT:
+                return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
+
         full_path = pipes.quote(os.path.abspath(self.source))
 
         #   Prep Ucon64 and parse Ucon64 output
@@ -886,9 +888,11 @@ class NESExtractor(Extractor):
 
     def extract(self, options=None):
         try:
-            subprocess.call('ucon64')
-        except OSError:
-            return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
+            devnull = open(os.devnull)
+            subprocess.Popen(['ucon64'], stdout=devnull, stderr=devnull).communicate()
+        except OSError as e:
+            if e.errno == os.errno.ENOENT:
+                return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
 
         full_path = pipes.quote(os.path.abspath(self.source))
 
