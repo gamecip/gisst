@@ -451,6 +451,10 @@ def citation_new(cite_type):
     return render_template('citation_new.html', cite_ref=cite, action_url=url_for('citation_add',
                                                                                   cite_type=cite.ref_type))
 
+@app.route("/delete/<uuid>")
+def delete(uuid):
+    subprocess.call(["citetool_editor", "delete", uuid])
+    return redirect(url_for('citations_all_page'))
 
 @app.route("/citations")
 def citations_all_page():

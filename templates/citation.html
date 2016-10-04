@@ -67,7 +67,10 @@
         <h2>Save States</h2>
         <ul>
             {% for state in save_states %}
-                <li><a href="/play/{{ state['game_uuid']}}?init_state={{ state['uuid']}}">{{ state['description'] }}</a></li>
+                <li>
+                    <a href="/play/{{ state['game_uuid']}}?init_state={{ state['uuid']}}">{{ state['description'] }}</a>
+                    <a href="/delete/{{ state['uuid']}}">[X]</a>
+                </li>
             {% endfor %}
         </ul>
     </div>

@@ -54,9 +54,11 @@ def cli(ctx, verbose, no_prompts):
 
     #   Check for ucon64
     try:
-        subprocess.call("ucon64")
-    except OSError:
-        click.echo("WARNING: ucon64 not installed. Required for NES, SNES and N64 rom info.")
+        devnull = open(os.devnull)
+        subprocess.Popen(['ucon64'], stdout=devnull, stderr=devnull).communicate()
+    except OSError as e:
+        if e.errno == os.errno.ENOENT:
+            click.echo("WARNING: ucon64 not installed. Required for NES, SNES and N64 rom info.")
 
     #   Check for data root
     if not os.path.exists(LOCAL_DATA_ROOT):
@@ -873,53 +875,72 @@ def prompt_input(prompt_text, options):
             return s
 
 @cli.command(help='Delete a citation by uuid')
+@click.argument('uuid')
+@click.option('--keep_performances', help='Deletes a game uuid if provided by leaves the game\'s performances')
 @click.pass_context
 def delete(ctx, uuid, keep_performances):
     no_prompts = ctx.obj['NO_PROMPTS']
     verbose = ctx.obj['VERBOSE']
 
+    def check_delete(path):
+        try:
+            shutil.rmtree(path)
+        except OSError as e:
+            print e.message
+
     game_ref = dbm.retrieve_game_ref(uuid)
+    perf_ref = dbm.retrieve_perf_ref(uuid)
+    state_ref = dbm.retrieve_save_state(uuid=uuid)
     if game_ref:
         perfs = dbm.retrieve_derived_performances(uuid)
         states = dbm.retrieve_save_state(game_uuid=uuid)
         files = dbm.retrieve_file_path(game_uuid=uuid)
 
         for f in files:
-            shutil.rmtree(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, f['source_data']))
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, f['source_data']))
         dbm.delete_from_table(dbm.GAME_FILE_PATH_TABLE, ['game_uuid'], [uuid])
 
         for s in states:
-            shutil.rmtree(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['save_state_source_data']))
+            if s['save_state_source_data']:
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['save_state_source_data']))
+            else:
+                if s['rl_starts_data']:
+                    check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['rl_starts_data']))
+                    check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['rl_lengths_data']))
             if s['has_screen']:
-                shutil.rmtree(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['uuid']))
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['uuid']))
         dbm.delete_from_table(dbm.GAME_SAVE_TABLE, ['game_uuid'], [uuid])
 
         for p in perfs:
             if p['replay_source_file_ref']:
-                shutil.rmtree(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, p['replay_source_file_ref']))
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, p['replay_source_file_ref']))
             dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['performance_uuid'], [p['uuid']])
         dbm.delete_from_table(dbm.PERFORMANCE_CITATION_TABLE, ['game_uuid'], [uuid])
 
         if game_ref['source_data']:
-            shutil.rmtree(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, game_ref['source_data']))
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, game_ref['source_data']))
 
-        # deleting from FTS table requires queries in the form: (https://www.sqlite.org/fts5.html#section_6_3)
-        # INSERT INTO table_name(table_name, **keys) VALUES ('delete', **values)
-        # this is more complex than I want to deal with right now
-        # dbm.insert_into_table(dbm.FTS_INDEX_TABLE,
-        #                       [dbm.FTS_INDEX_TABLE].extend(dbm.fields[dbm.FTS_INDEX_TABLE]),
-        #                       [uuid, None, game_ref.ref_type, game_ref.to_json_string()])
-
-
+        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
+        dbm.delete_from_table(dbm.GAME_CITATION_TABLE, ['uuid'], [uuid])
+    elif perf_ref:
+        dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['performance_uuid'], [uuid])
+        if perf_ref['replay_source_file_ref']:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, perf_ref['replay_source_file_ref']))
+        dbm.delete_from_table(dbm.PERFORMANCE_CITATION_TABLE, ['uuid'], [uuid])
+        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
+    elif state_ref:
+        state_ref = state_ref[0] # retrieve states returns lists
+        files = dbm.retrieve_file_path(save_state_uuid=uuid)
+        for f in files:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, f['source_data']))
+        dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['save_state_uuid'], [uuid])
+        if state_ref['has_screen']:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, state_ref['uuid']))
+        dbm.delete_from_table(dbm.GAME_SAVE_TABLE, ['uuid'], [uuid])
+        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
     else:
-        perf_ref = dbm.retrieve_perf_ref(uuid)
-        # add deletion of perf state links from time indexes
-        if not perf_ref:
-            click.echo('UUID {} not found.'.format(uuid))
-            sys.exit(1)
-
-
-
+        click.echo('UUID {} not found.'.format(uuid))
+        sys.exit(1)
 
 
 @cli.command(help='Clear local data')

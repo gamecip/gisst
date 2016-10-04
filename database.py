@@ -246,7 +246,7 @@ class DatabaseManager:
     @classmethod
     def delete_from_table(cls, table_name, fields, values, relation=AND):
         where_clause = cls.get_where_clause(fields, values, relation)
-        result = cls.run_query(r'delete_from {} where {}'.format(table_name, where_clause), dict(zip(fields, values)))
+        result = cls.run_query(r'delete from {} where {}'.format(table_name, where_clause), dict(zip(fields, values)))
         return result
 
     @classmethod

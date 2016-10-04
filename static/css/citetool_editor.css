@@ -66,6 +66,12 @@
     width: 300px;
 }
 
+.header-delete {
+    color: white;
+    background-color: gray;
+    width: 25px;
+}
+
 .header-description{
     color: white;
     background-color: gray;

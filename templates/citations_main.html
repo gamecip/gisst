@@ -16,6 +16,7 @@
             <th class="cite-table-header">{{header.capitalize()}}</th>
             {% endif %}
         {% endfor %}
+        <th class="header-delete">D?</th>
     </tr>
     {% for game in all_game_cites %}
         <tr class="cite-table-row">
@@ -26,6 +27,7 @@
                     <td class="cite-table-data">{{v}}</td>
                 {% endif %}
             {% endfor %}
+            <td class="cite-table-data"><a href="/delete/{{game.elements['uuid']}}">[X]</a></td>
         </tr>
     {% endfor %}
 </table>
@@ -43,6 +45,7 @@
             <th class="cite-table-header">{{header.capitalize()}}</th>
             {% endif %}
         {% endfor %}
+        <th class="header-delete">D?</th>
     </tr>
     {% for perf in all_perf_cites %}
     <tr class="cite-table-row">
@@ -53,7 +56,8 @@
             <td class="cite-table-data">{{v}}</td>
             {% endif %}
         {% endfor %}
-    </tr>
+        <td class="cite-table-data"><a href="/delete/{{perf.elements['uuid']}}">[X]</a></td>
+        </tr>
     {% endfor %}
 </table>
 </body>
