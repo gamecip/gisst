@@ -51,9 +51,38 @@ def cli(ctx, verbose, no_prompts):
     ctx.obj = dict()    # Context object that stores application state in dict, could make class at some point
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['NO_PROMPTS'] = no_prompts
-    check_for_data_root()
-    check_for_fts_lib() #   Hack right now, will change
-    check_for_db_and_data()
+
+    #   Check for ucon64
+    try:
+        devnull = open(os.devnull)
+        subprocess.Popen(['ucon64'], stdout=devnull, stderr=devnull).communicate()
+    except OSError as e:
+        if e.errno == os.errno.ENOENT:
+            click.echo("WARNING: ucon64 not installed. Required for NES, SNES and N64 rom info.")
+
+    #   Check for data root
+    if not os.path.exists(LOCAL_DATA_ROOT):
+        click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
+        os.makedirs(LOCAL_DATA_ROOT)
+
+    #   Check for fts lib
+    if os.path.exists(dbm.FTS_EXT_PATH):
+        pass
+    else:
+        if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib"):
+            click.echo("Copying fts5.dylib to {}".format(LOCAL_DATA_ROOT))
+            shutil.copy(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib", LOCAL_DATA_ROOT)
+        else:
+            click.echo("Please put ft5.dylib into {} and run citetool-editor again.".format(LOCAL_DATA_ROOT))
+
+    # Check for tables, extracted, game citation and performance citation
+    dbm.create_tables()
+
+    # Check for data directory
+    for data_path, path_name in ((LOCAL_GAME_DATA_STORE, "game data"), (LOCAL_CITATION_DATA_STORE, "citation data")):
+        if not os.path.exists(data_path):
+            click.echo("Local {} store: '{}' not found, creating...".format(path_name, data_path))
+            os.makedirs(data_path)
 
 
 @cli.command(help='Run local access server for citations.')
@@ -99,7 +128,11 @@ def extract_uri(ctx, uri):
 
     cond_print(verbose, 'Extracting URI...')
     # These are separate since file downloads might rely on subprocesses
-    extractor.extract()
+    try:
+        extractor.extract()
+    except ExtractorError as e:
+        click.echo(e.message)
+        sys.exit(1)
 
     # Block until extraction complete, needed for anything requiring sub-processes
     while not extractor.extracted_info:
@@ -245,7 +278,11 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
     #   FILE PATH citation
     if file_path:
         extractor = get_extractor_for_file(os.path.expanduser(file_path))
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
         citation, extracted_options = extractor.create_citation()
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
@@ -279,7 +316,11 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
             alternate_citation = choose_citation(search_locally_with_citation(citation))
 
         #   Extract all the files and paths
-        extractor.extract(options=options)
+        try:
+            extractor.extract(options=options)
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
 
         #   Add file_paths to game data store if this is a new citation
         file_info = extractor.extracted_info['file_info']
@@ -301,7 +342,11 @@ def cite_game(ctx, file_path, directory, executable, url, title, partial, export
             sys.exit(1)
 
         extractor = get_extractor_for_uri(url, source)
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
         # Block if this is a link to a video or other extractor process
         while not extractor.extracted_info:
             pass
@@ -385,7 +430,11 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
 
     if file_path:
         extractor = get_extractor_for_file(os.path.expanduser(file_path))
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
         citation, extracted_options = extractor.create_citation()
         if not no_prompts:
             citation = get_citation_user_input(citation, extracted_options)
@@ -396,8 +445,14 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
         except SourceError as e:
             click.echo(e.message)
             sys.exit(1)
+
         extractor = get_extractor_for_uri(url, source)
-        extractor.extract()
+        try:
+            extractor.extract()
+        except ExtractorError as e:
+            click.echo(e.message)
+            sys.exit(1)
+
         #   Block while waiting for extraction to finish, necessary for video downloads
         while not extractor.extracted_info:
             pass
@@ -819,30 +874,73 @@ def prompt_input(prompt_text, options):
         else:
             return s
 
-def check_for_data_root():
-    if not os.path.exists(LOCAL_DATA_ROOT):
-        click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
-        os.makedirs(LOCAL_DATA_ROOT)
+@cli.command(help='Delete a citation by uuid')
+@click.argument('uuid')
+@click.option('--keep_performances', help='Deletes a game uuid if provided by leaves the game\'s performances')
+@click.pass_context
+def delete(ctx, uuid, keep_performances):
+    no_prompts = ctx.obj['NO_PROMPTS']
+    verbose = ctx.obj['VERBOSE']
 
-def check_for_db_and_data():
-    # Check for tables, extracted, game citation and performance citation
-    dbm.create_tables()
+    def check_delete(path):
+        try:
+            shutil.rmtree(path)
+        except OSError as e:
+            print e.message
 
-    # Check for data directory
-    for data_path, path_name in ((LOCAL_GAME_DATA_STORE, "game data"), (LOCAL_CITATION_DATA_STORE, "citation data")):
-        if not os.path.exists(data_path):
-            click.echo("Local {} store: '{}' not found, creating...".format(path_name, data_path))
-            os.makedirs(data_path)
+    game_ref = dbm.retrieve_game_ref(uuid)
+    perf_ref = dbm.retrieve_perf_ref(uuid)
+    state_ref = dbm.retrieve_save_state(uuid=uuid)
+    if game_ref:
+        perfs = dbm.retrieve_derived_performances(uuid)
+        states = dbm.retrieve_save_state(game_uuid=uuid)
+        files = dbm.retrieve_file_path(game_uuid=uuid)
 
-def check_for_fts_lib():
-    if os.path.exists(dbm.FTS_EXT_PATH):
-        pass
+        for f in files:
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, f['source_data']))
+        dbm.delete_from_table(dbm.GAME_FILE_PATH_TABLE, ['game_uuid'], [uuid])
+
+        for s in states:
+            if s['save_state_source_data']:
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['save_state_source_data']))
+            else:
+                if s['rl_starts_data']:
+                    check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['rl_starts_data']))
+                    check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['rl_lengths_data']))
+            if s['has_screen']:
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, s['uuid']))
+        dbm.delete_from_table(dbm.GAME_SAVE_TABLE, ['game_uuid'], [uuid])
+
+        for p in perfs:
+            if p['replay_source_file_ref']:
+                check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, p['replay_source_file_ref']))
+            dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['performance_uuid'], [p['uuid']])
+        dbm.delete_from_table(dbm.PERFORMANCE_CITATION_TABLE, ['game_uuid'], [uuid])
+
+        if game_ref['source_data']:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, game_ref['source_data']))
+
+        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
+        dbm.delete_from_table(dbm.GAME_CITATION_TABLE, ['uuid'], [uuid])
+    elif perf_ref:
+        dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['performance_uuid'], [uuid])
+        if perf_ref['replay_source_file_ref']:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, perf_ref['replay_source_file_ref']))
+        dbm.delete_from_table(dbm.PERFORMANCE_CITATION_TABLE, ['uuid'], [uuid])
+        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
+    elif state_ref:
+        state_ref = state_ref[0] # retrieve states returns lists
+        files = dbm.retrieve_file_path(save_state_uuid=uuid)
+        for f in files:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, f['source_data']))
+        dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['save_state_uuid'], [uuid])
+        if state_ref['has_screen']:
+            check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, state_ref['uuid']))
+        dbm.delete_from_table(dbm.GAME_SAVE_TABLE, ['uuid'], [uuid])
+        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
     else:
-        if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib"):
-            click.echo("Copying fts5.dylib to {}".format(LOCAL_DATA_ROOT))
-            shutil.copy(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib", LOCAL_DATA_ROOT)
-        else:
-            click.echo("Please put ft5.dylib into {} and run citetool-editor again.".format(LOCAL_DATA_ROOT))
+        click.echo('UUID {} not found.'.format(uuid))
+        sys.exit(1)
 
 
 @cli.command(help='Clear local data')

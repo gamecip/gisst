@@ -62,8 +62,6 @@ class DatabaseManager:
     GAME_SAVE_TABLE = 'game_save_table'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     SAVE_STATE_PERFORMANCE_LINK_TABLE = 'save_state_performance_link_table'
-    FILE_PATH_SAVE_STATE_LINK_TABLE = 'file_path_save_state_link_table'
-    SCREENSHOT_LINK_TABLE = 'screenshot_link_table'
     FTS_INDEX_TABLE = 'fts_index_table'
     FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
 
@@ -170,11 +168,8 @@ class DatabaseManager:
         SAVE_STATE_PERFORMANCE_LINK_TABLE: [
             ('performance_uuid', 'text', field_constraint),
             ('save_state_uuid', 'text', field_constraint),
-            ('time_index', 'integer', field_constraint)
-        ],
-        SCREENSHOT_LINK_TABLE: [
-            ('performance_uuid', 'text', field_constraint),
-            ('time_index', 'text', field_constraint)
+            ('time_index', 'integer', field_constraint),
+            ('action', 'text', field_constraint) #    Action is "load" or "save"
         ]
     }
 
@@ -235,7 +230,9 @@ class DatabaseManager:
 
     @classmethod
     def insert_into_table(cls, table_name, keys, values):
-        query = 'insert into {} values ({})'.format(table_name, ",".join([':{}'.format(k) for k in keys]))
+        query = 'insert into {}({}) values ({})'.format(table_name, #table to insert into
+                                                         ",".join([k for k in keys]), #columns in table
+                                                         ",".join([':{}'.format(k) for k in keys])) #mapping of columns ids to placeholder assignments for values
         return cls.run_query(query, dict(zip(keys,values)))
 
     @classmethod
@@ -246,6 +243,11 @@ class DatabaseManager:
                                dict(zip(chain(fields, where_fields),chain(values, where_values))))
         return result
 
+    @classmethod
+    def delete_from_table(cls, table_name, fields, values, relation=AND):
+        where_clause = cls.get_where_clause(fields, values, relation)
+        result = cls.run_query(r'delete from {} where {}'.format(table_name, where_clause), dict(zip(fields, values)))
+        return result
 
     @classmethod
     def run_query(cls, query, parameters=None, commit=True, many=False):
@@ -365,9 +367,9 @@ class DatabaseManager:
         values.append(fields.get('emulator_name'))
         values.append(fields.get('emulator_version'))
         values.append(fields.get('emt_stack_pointer'))
-        values.append(fields.get('has_screen'))
         values.append(fields.get('stack_pointer'))
-        values.append(fields.get('system_time'))
+        values.append(fields.get('time'))
+        values.append(fields.get('has_screen'))
         values.append(fields.get('created_on'))
         values.append(fields.get('created'))
         result = cls.insert_into_table(table, cls.headers[table], values)
@@ -412,12 +414,12 @@ class DatabaseManager:
         return cls.insert_into_table(cls.GAME_FILE_PATH_TABLE, cls.headers[cls.GAME_FILE_PATH_TABLE], new_values)
 
     @classmethod
-    def link_save_state_to_performance(cls, state_uuid, perf_uuid, time_index):
+    def link_save_state_to_performance(cls, state_uuid, perf_uuid, time_index, action):
         if cls.is_attr_in_db('uuid', state_uuid, cls.GAME_SAVE_TABLE) and \
                 cls.is_attr_in_db('uuid', perf_uuid, cls.PERFORMANCE_CITATION_TABLE):
             cls.insert_into_table(cls.SAVE_STATE_PERFORMANCE_LINK_TABLE,
-                                  ['save_state_uuid', 'performance_uuid', 'time_index'],
-                                  [state_uuid, perf_uuid, time_index])
+                                  ['performance_uuid', 'save_state_uuid', 'time_index', 'action'],
+                                  [perf_uuid, state_uuid, time_index, action])
             return cls.retrieve_state_perf_link(state_uuid, perf_uuid)
         else:
             return None
@@ -517,7 +519,8 @@ class DatabaseManager:
                                                    [perf_uuid],
                                                    cls.SAVE_STATE_PERFORMANCE_LINK_TABLE)
         link_info = [{'state_record': cls.retrieve_save_state(uuid=link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('save_state_uuid')])[0],
-                      'time_index': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('time_index')] } for link in links]
+                      'time_index': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('time_index')],
+                      'action': link[cls.headers[cls.SAVE_STATE_PERFORMANCE_LINK_TABLE].index('action')]} for link in links]
         return link_info
 
     #   For now returns list of dicts with relevant path information
