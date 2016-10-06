@@ -38,14 +38,14 @@ from schema import (
 )
 from app import app
 
-VERSION = '0.1'
+__version__ = "0.1.0"
 __author__ = 'erickaltman'
 
 
 @click.group()
 @click.option('--verbose', is_flag=True, help='To everything that\'s going on.')
 @click.option('--no_prompts', is_flag=True, help='Turn off all user prompts (use with care).')
-@click.version_option(version=VERSION)
+@click.version_option(version=__version__)
 @click.pass_context
 def cli(ctx, verbose, no_prompts):
     ctx.obj = dict()    # Context object that stores application state in dict, could make class at some point
@@ -973,7 +973,3 @@ def clear_local_data(ignore_game_data=False):
                 click.echo(e.message)
     else:
         click.echo("No local data found, exiting.")
-
-# Needed for testing as script for debugging, not used when run as a command
-if __name__ == '__main__':
-    cli()

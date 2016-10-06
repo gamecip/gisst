@@ -16,3 +16,5 @@ the-oregon-trail/
 *.smc
 *.nes
 *.z64
+build
+dist
