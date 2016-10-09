@@ -5,12 +5,14 @@ import json
 import pprint
 import shutil
 import subprocess
+from whoosh.index import open_dir
 from math import ceil
 from database import DatabaseManager as dbm
 from database import (
     LOCAL_CITATION_DATA_STORE,
     LOCAL_GAME_DATA_STORE,
     LOCAL_DATA_ROOT,
+    LOCAL_FTS_INDEX
 )
 from utils import (
     coroutine,
@@ -34,7 +36,8 @@ from schema import (
     PERF_SCHEMA_VERSION,
     generate_cite_ref,
     GAME_CITE_REF,
-    PERF_CITE_REF
+    PERF_CITE_REF,
+    STATE_CITE_REF
 )
 from app import app
 
@@ -64,16 +67,6 @@ def cli(ctx, verbose, no_prompts):
     if not os.path.exists(LOCAL_DATA_ROOT):
         click.echo("Local data root not found, creating {}".format(LOCAL_DATA_ROOT))
         os.makedirs(LOCAL_DATA_ROOT)
-
-    #   Check for fts lib
-    if os.path.exists(dbm.FTS_EXT_PATH):
-        pass
-    else:
-        if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib"):
-            click.echo("Copying fts5.dylib to {}".format(LOCAL_DATA_ROOT))
-            shutil.copy(os.path.dirname(os.path.abspath(__file__)) + "/fts5.dylib", LOCAL_DATA_ROOT)
-        else:
-            click.echo("Please put ft5.dylib into {} and run citetool-editor again.".format(LOCAL_DATA_ROOT))
 
     # Check for tables, extracted, game citation and performance citation
     dbm.create_tables()
@@ -482,20 +475,27 @@ def cite_performance(ctx, export, file_path, url, partial, schema_version):
 @click.argument('partial_description')
 @click.option('--game_only', help='Limit search to game citations.', is_flag=True)
 @click.option('--perf_only', help='Limit search to performance citations.', is_flag=True)
+@click.option('--state_only', help='Limit search to state citations.', is_flag=True)
 @click.pass_context
-def search(ctx, partial_description, game_only, perf_only):
+def search(ctx, partial_description, game_only, perf_only, state_only):
     no_prompts = ctx.obj['NO_PROMPTS']
+    opts = 0
+    if state_only: opts += 1
+    if game_only: opts += 1
+    if perf_only: opts += 1
 
-    if game_only and perf_only:
-        click.echo('Choose either game_only or perf_only flags, not both')
+    if opts > 1:
+        click.echo('Choose either game_only or perf_only or state_only flags, not multiple')
         sys.exit(1)
 
     partial_dict = json.loads(partial_description)
     #   For now we are assuming that we will not want to search the extracted data sets
     if game_only:
-        exclude_refs = ('performance', 'extracted')
+        exclude_refs = ('performance', 'extracted', 'state')
     elif perf_only:
-        exclude_refs = ('game', 'extracted')
+        exclude_refs = ('game', 'extracted', 'state')
+    elif state_only:
+        exclude_refs = ('game', 'extracted', 'performance')
     else:
         exclude_refs = ('extracted',)
 
@@ -607,11 +607,13 @@ def prep_search_results(results):
         return pack
 
     results_dict = dict()
-    results_dict['games'] = [c.elements for c in results if c.ref_type == GAME_CITE_REF]
+    results_dict['games'] = [c.elements for c in results if hasattr(c, 'ref_type') and c.ref_type == GAME_CITE_REF]
     results_dict['performances'] = [p for p in map(make_performance_package,
-                                                   [x for x in results if x.ref_type == PERF_CITE_REF])]
+                                                   [x for x in results if hasattr(x, 'ref_type') and x.ref_type == PERF_CITE_REF])]
+    results_dict['states'] = [s for s in results if 'ref_type' in s and s['ref_type'] == STATE_CITE_REF]
     results_dict['total_game_records'] = len(results_dict['games'])
     results_dict['total_performance_records'] = len(results_dict['performances'])
+    results_dict['total_state_records'] = len(results_dict['states'])
     results_dict['total_records'] = len(results)
     return results_dict
 
@@ -664,32 +666,31 @@ def search_locally_with_partial(partial, exclude_ref_types=None):
     start_index = int(partial['start_index'])
     limit = int(partial['limit']) if 'limit' in partial else None
     #   Apparently Python DB API and Sqlite and commas (,), parans ((,)), and colons (:) do not play nice with FTS?
-    search_strings = [clean_for_sqlite_query(unicode(v)) for k, v in partial['description'].items()]
-    source_index = dbm.headers[dbm.FTS_INDEX_TABLE].index('source_type')
-    uuid_index = dbm.headers[dbm.FTS_INDEX_TABLE].index('uuid')
+    search_strings = u" ".join([unicode(v) for k, v in partial['description'].items()])
+    for ref_type in exclude_ref_types:
+        search_strings += u" AND NOT (tags:{})".format(ref_type)
+    uuids = dbm.retrieve_from_fts(search_strings, start_index=start_index, limit=limit)
 
-    if not exclude_ref_types:
-        results = dbm.retrieve_from_fts(search_strings, start_index=start_index, limit=limit)
-    else:
-        results = [x for x in dbm.retrieve_from_fts(search_strings) if x[source_index] not in exclude_ref_types]
-
-    def get_cite_for_result(result):
-        ref_type = result[source_index]
-        uuid = result[uuid_index]
+    def get_cite_for_uuid(result):
+        ref_type = result['tags']
+        uuid = result['uuid']
         if ref_type == GAME_CITE_REF:
             table = dbm.GAME_CITATION_TABLE
         if ref_type == PERF_CITE_REF:
             table = dbm.PERFORMANCE_CITATION_TABLE
+        if ref_type == STATE_CITE_REF:
+            table = dbm.GAME_SAVE_TABLE
 
-        db_values = dbm.retrieve_attr_from_db('uuid', uuid, table, limit=1)[0]
-        citation = dbm.create_cite_ref_from_db(ref_type, db_values)
+        if ref_type in (GAME_CITE_REF, PERF_CITE_REF):
+            db_values = dbm.retrieve_attr_from_db('uuid', uuid, table, limit=1)[0]
+            citation = dbm.create_cite_ref_from_db(ref_type, db_values)
+        else:
+            citation = dbm.retrieve_save_state(uuid=uuid)[0]
+            citation['ref_type'] = STATE_CITE_REF
         return citation
 
     # Results should already be sorted by rank
-    citations = map(get_cite_for_result, results)
-    # Results not already limited if there were exclusions
-    if exclude_ref_types:
-        return bound_array(citations, start_index=start_index, limit=limit)
+    citations = map(get_cite_for_uuid, uuids)
     return citations
 
 
@@ -888,6 +889,12 @@ def delete(ctx, uuid, keep_performances):
         except OSError as e:
             print e.message
 
+    def delete_from_fts(uuid):
+        ix = open_dir(LOCAL_FTS_INDEX)
+        writer = ix.writer()
+        writer.delete_by_term('id', uuid)
+        writer.commit()
+
     game_ref = dbm.retrieve_game_ref(uuid)
     perf_ref = dbm.retrieve_perf_ref(uuid)
     state_ref = dbm.retrieve_save_state(uuid=uuid)
@@ -920,14 +927,14 @@ def delete(ctx, uuid, keep_performances):
         if game_ref['source_data']:
             check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_GAME_DATA_STORE, game_ref['source_data']))
 
-        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
         dbm.delete_from_table(dbm.GAME_CITATION_TABLE, ['uuid'], [uuid])
+        delete_from_fts(uuid)
     elif perf_ref:
         dbm.delete_from_table(dbm.SAVE_STATE_PERFORMANCE_LINK_TABLE,['performance_uuid'], [uuid])
         if perf_ref['replay_source_file_ref']:
             check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, perf_ref['replay_source_file_ref']))
         dbm.delete_from_table(dbm.PERFORMANCE_CITATION_TABLE, ['uuid'], [uuid])
-        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
+        delete_from_fts(uuid)
     elif state_ref:
         state_ref = state_ref[0] # retrieve states returns lists
         files = dbm.retrieve_file_path(save_state_uuid=uuid)
@@ -937,39 +944,28 @@ def delete(ctx, uuid, keep_performances):
         if state_ref['has_screen']:
             check_delete(os.path.join(LOCAL_DATA_ROOT, LOCAL_CITATION_DATA_STORE, state_ref['uuid']))
         dbm.delete_from_table(dbm.GAME_SAVE_TABLE, ['uuid'], [uuid])
-        dbm.delete_from_table(dbm.FTS_INDEX_TABLE, ['uuid'], [uuid])
+        delete_from_fts(uuid)
     else:
         click.echo('UUID {} not found.'.format(uuid))
         sys.exit(1)
 
 
 @cli.command(help='Clear local data')
-@click.option('--ignore_game_data', help="Clear everything but local game data files.")
 @click.pass_context
-def clear(ctx, ignore_game_data):
+def clear(ctx):
     no_prompts = ctx.obj['NO_PROMPTS']
 
-    if no_prompts:
-        clear_local_data(ignore_game_data)
-    else:
-        conf_message = "all" if not ignore_game_data else "all citation"
-        if click.confirm("Warning: This will erase {} data. Are you sure? ".format(conf_message)):
-            clear_local_data(ignore_game_data)
-
-
-def clear_local_data(ignore_game_data=False):
-    if os.path.exists(LOCAL_DATA_ROOT):
-        if ignore_game_data:
-            try:
-                shutil.rmtree(LOCAL_CITATION_DATA_STORE)
-            except OSError as e:
-                click.echo(e.message)
-
-            dbm.delete_db()
-        else:
+    def clear_local_data():
+        if os.path.exists(LOCAL_DATA_ROOT):
             try:
                 shutil.rmtree(LOCAL_DATA_ROOT)
             except OSError as e:
                 click.echo(e.message)
+        else:
+            click.echo("No local data found, exiting.")
+
+    if no_prompts:
+        clear_local_data()
     else:
-        click.echo("No local data found, exiting.")
+        if click.confirm("Warning: This will erase all data. Are you sure? "):
+            clear_local_data()

@@ -27,7 +27,7 @@ setup(
         'Pillow',
         'gnureadline',
         'requests',
-        'pysqlite>=2',
+        'Whoosh'
     ],
     entry_points='''
         [console_scripts]

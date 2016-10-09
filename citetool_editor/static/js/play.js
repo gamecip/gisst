@@ -511,7 +511,7 @@ CiteManager = (function(modules){
         function prepForStartEmulation(err, c, i, d){
             //Need new dataObject so that cache is correct
             var dataToLoad = {};
-            if(!c.emu.usesHeapSave){
+            if(info.record.emt_stack_pointer !== null){
                 dataToLoad.heap = d.buffer;
                 dataToLoad.emtStack = d.emtStack = info.record.emt_stack_pointer;
                 dataToLoad.time = d.time = info.record.time;
@@ -665,9 +665,9 @@ CiteManager = (function(modules){
             null  //blank unless dependent files
             //options are next argument if needed
         ];
-        var hasFileSystem = context.emu.hasFileSystem;
         if(context.lastState){
-            if(hasFileSystem){
+            var emulatorName = context.lastState.record.emulator_name;
+            if(emulatorName !== 'DOSBOX' && emulatorName !== 'MUPEN64PLUS'){
                 args[3] = context.lastState.data;
             }else{
                 args[4] = context.lastState.data;

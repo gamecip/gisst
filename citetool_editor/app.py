@@ -64,24 +64,36 @@ def search():
             proc_args = ['citetool_editor', '--no_prompts', 'search', '--game_only', search_json]
         elif search_type == 'performance':
             proc_args = ['citetool_editor', '--no_prompts', 'search', '--perf_only', search_json]
+        elif search_type == 'state':
+            proc_args = ['citetool_editor', '--no_prompts', 'search', '--state_only', search_json]
 
-
-        results = json.loads(subprocess.check_output(proc_args))
-        results['games'] = map(lambda d: dict((i, d[i]) for i in d if i != 'schema_version'), results['games'])
-        results['performances'] = map(lambda d: dict((i, d['performance'][i]) for i in d['performance'] if i != 'schema_version'), results['performances'])
-        game_results = map(lambda x: generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **x), results['games'])
-        performance_results = map(lambda x: generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **x), results['performances'])
+        try:
+            output = subprocess.check_output(proc_args)
+        except subprocess.CalledProcessError as e:
+            print(e.message)
+            print(e.output)
+            game_results = []
+            performance_results =[]
+            state_results =[]
+        else:
+            results = json.loads(output)
+            results['games'] = map(lambda d: dict((i, d[i]) for i in d if i != 'schema_version'), results['games'])
+            results['performances'] = map(lambda d: dict((i, d['performance'][i]) for i in d['performance'] if i != 'schema_version'), results['performances'])
+            game_results = map(lambda x: generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **x), results['games'])
+            performance_results = map(lambda x: generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **x), results['performances'])
+            state_results = results['states']
     else:
         game_results = []
         performance_results = []
+        state_results = []
 
     return render_template('search.html',
                            game_results=game_results,
                            performance_results=performance_results,
+                           state_results=state_results,
                            source_type=search_type,
                            prev_query=search_string,
-                           total_results=len(game_results) + len(performance_results))
-
+                           total_results=len(game_results) + len(performance_results) + len(state_results))
 
 @app.route("/citation/<uuid>")
 def citation_page(uuid):
@@ -252,7 +264,7 @@ def add_save_state(uuid):
     fields = OrderedDict(
         description=request.form.get('description'),
         game_uuid=uuid,
-        save_state_type='state',
+        save_state_type=u'state',
         emulator_name=request.form.get('emulator'),
         emulator_version=request.form.get('emulator_version'),
         emt_stack_pointer=request.form.get('emt_stack_pointer'),

@@ -12,6 +12,7 @@
             <input class="search_select_radio" name="search_type" type="radio" value="all" checked> All
             <input class="search_select_radio" name="search_type" type="radio" value="game"> Games Only
             <input class="search_select_radio" name="search_type" type="radio" value="performance"> Performances Only
+            <input class="search_select_radio" name="search_type" type="radio" value="state"> States Only
         </div>
         <input id="search_submit_button" type="submit" value="Search" />
     </form>
@@ -56,6 +57,27 @@
                 {% endfor %}
             </table>
         </div>
+    {% endif%}
+
+    {% if state_results %}
+    <h3>State Citations</h3>
+    <div id="search_state_results_table">
+        <table>
+            {% for result in state_results %}
+            <tr>
+                {% for k, v in result.items() %}
+                {% if k == 'game_uuid'%}
+                <td><a href="/citation/{{v}}">{{v}}</a></td>
+                {% elif k == 'description'%}
+                <td><a href="/play/{{ result['game_uuid']}}?init_state={{ result['uuid']}}">{{ result['description'] }}</a></td>
+                {% else %}
+                <td>{{v}}</td>
+                {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
     {% endif%}
 
 </body>

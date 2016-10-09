@@ -50,14 +50,14 @@ from database import DatabaseManager as dbm
 # entries in extracted_data db may refer to the same data
 # on the file system.
 
-TEMP_DIRECTORY = u"{}/tmp".format(LOCAL_DATA_ROOT)
+TEMP_DIRECTORY = os.path.join(LOCAL_DATA_ROOT, 'tmp')
 
 # Saves pages linked to a uri in the extract_store
 # hashed by uri and dt string in ISO format
 # Returns hex hash of page_data
 def save_page_to_extract_store(uri, dt, page_data):
     name_hash = hashlib.sha1(uri + dt).hexdigest()
-    hash_dir = "{}/{}".format(LOCAL_CITATION_DATA_STORE, name_hash)
+    hash_dir = os.path.join(LOCAL_CITATION_DATA_STORE, name_hash)
 
     # http://stackoverflow.com/questions/273192/in-python-check-if-a-directory-exists-and-create-it-if-necessary
     # Note that not perfect but effective for now
@@ -70,9 +70,9 @@ def save_page_to_extract_store(uri, dt, page_data):
 
     if len(page_data) > 1:
         for i, page in enumerate(page_data):
-            write_html_file("{}/{}_{}.html".format(hash_dir, name_hash, i), page_data[i])
+            write_html_file(os.path.join(hash_dir, "{}_{}.html".format(name_hash, i)), page_data[i])
     else:
-        write_html_file("{}/{}.html".format(hash_dir, name_hash), page_data[0])
+        write_html_file(os.path.join(hash_dir, "{}.html".format(name_hash)), page_data[0])
 
     return name_hash
 
@@ -88,9 +88,9 @@ def save_byte_array_to_store(b_array, file_name=None, store_path=None):
     hash = hasher.hexdigest()
 
     if not store_path:
-        hash_dir = "{}/{}".format(LOCAL_CITATION_DATA_STORE, hash)
+        hash_dir = os.path.join(LOCAL_CITATION_DATA_STORE, hash)
     else:
-        hash_dir = "{}/{}".format(store_path, hash)
+        hash_dir = os.path.join(store_path, hash)
 
     if not os.path.exists(hash_dir):
         os.makedirs(hash_dir)
@@ -98,7 +98,7 @@ def save_byte_array_to_store(b_array, file_name=None, store_path=None):
     if not file_name:
         file_name = "{}_{}".format(hash, calendar.timegm(datetime.utcnow().timetuple()))
 
-    f = open("{}/{}".format(hash_dir, file_name), "wb")
+    f = open(os.path.join(hash_dir, file_name), "wb")
     f.write(b_array)
     f.close()
 
@@ -123,9 +123,9 @@ def save_file_to_store(file_path, store_path=None):
     hash = hasher.hexdigest()
     #   Default to citation data store
     if not store_path:
-        hash_dir = "{}/{}".format(LOCAL_CITATION_DATA_STORE, hash)
+        hash_dir = os.path.join(LOCAL_CITATION_DATA_STORE, hash)
     else:
-        hash_dir = "{}/{}".format(store_path, hash)
+        hash_dir = os.path.join(store_path, hash)
 
     if not os.path.exists(hash_dir):
         os.makedirs(hash_dir)
@@ -656,14 +656,14 @@ class YoutubeExtractor(Extractor):
         if d['status'] == 'finished':
             filename = d['filename'].split('/')[-1].rpartition('.')[0] # Flimsy for now
             filename_with_ext = d['filename'].split('/')[-1]
-            hash = save_file_to_store('{}/{}'.format(TEMP_DIRECTORY, filename_with_ext))
-            hash_dir = '{}/{}'.format(LOCAL_CITATION_DATA_STORE, hash)
+            hash = save_file_to_store(os.path.join(TEMP_DIRECTORY, filename_with_ext))
+            hash_dir = os.path.join(LOCAL_CITATION_DATA_STORE, hash)
 
-            shutil.copy2('{}/{}.description'.format(TEMP_DIRECTORY, filename), hash_dir)
-            shutil.copy2('{}/{}.info.json'.format(TEMP_DIRECTORY, filename), hash_dir)
-            shutil.copy2('{}/{}.annotations.xml'.format(TEMP_DIRECTORY, filename), hash_dir)
+            shutil.copy2(os.path.join(TEMP_DIRECTORY, "{}.description".format(filename)), hash_dir)
+            shutil.copy2(os.path.join(TEMP_DIRECTORY, "{}.info.json".format(filename)), hash_dir)
+            shutil.copy2(os.path.join(TEMP_DIRECTORY, "{}.annotations.xml".format(filename)), hash_dir)
 
-            with open('{}/{}.info.json'.format(TEMP_DIRECTORY, filename)) as json_file:
+            with open(os.path.join(TEMP_DIRECTORY, "{}.info.json".format(filename))) as json_file:
                 info_json = json.load(json_file)
 
             extracted_info = {}
@@ -842,7 +842,7 @@ class SMCExtractor(Extractor):
             if e.errno == os.errno.ENOENT:
                 return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
 
-        full_path = pipes.quote(os.path.abspath(self.source))
+        full_path = os.path.abspath(self.source)
 
         #   Prep Ucon64 and parse Ucon64 output
         proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)
@@ -894,7 +894,7 @@ class NESExtractor(Extractor):
             if e.errno == os.errno.ENOENT:
                 return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
 
-        full_path = pipes.quote(os.path.abspath(self.source))
+        full_path = os.path.abspath(self.source)
 
         #   Prep Ucon64 and parse Ucon64 output
         proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)
@@ -946,7 +946,7 @@ class Z64Extractor(Extractor):
         except OSError:
             return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
 
-        full_path = pipes.quote(os.path.abspath(self.source))
+        full_path = os.path.abspath(self.source)
 
         proc = subprocess.Popen(['ucon64', full_path], stdout=subprocess.PIPE)
         parse_data = parse_ucon64_output(proc.stdout, self.headers, 6, 13, 19)

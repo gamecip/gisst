@@ -568,8 +568,12 @@ var UI = (function(){
         },
         render: function(){
             var perfURL = "";
+            var screenURL = "";
             if(this.state.lastSelectedPerfRecord){
                 perfURL = "/cite_data/" + this.state.lastSelectedPerfRecord.replay_source_file_ref + "/" + this.state.lastSelectedPerfRecord.replay_source_file_name;
+            }
+            if(this.state.lastSelectedStateRecord){
+                screenURL = "/cite_data/" + this.state.lastSelectedStateRecord.uuid + "/screen_" + this.state.lastSelectedStateRecord.uuid + ".png";
             }
             return (
                 React.createElement('div', {style:tabComponentStyle},
@@ -585,6 +589,7 @@ var UI = (function(){
                             React.createElement(GameFileListing, {fileInformation: this.state.currentGameFiles})
                         ),
                         React.createElement(TabPanel, {},
+                            React.DOM.img({src:screenURL}),
                             React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'state', id: this.state.lastStateId, record: this.state.lastSelectedStateRecord})
                         ),
                         React.createElement(TabPanel, {},
