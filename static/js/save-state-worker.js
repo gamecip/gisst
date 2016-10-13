@@ -49,13 +49,21 @@ function asyncFileSaveTasks(fi, fm, cb){
     var tasks = [];
     // Organize individual POSTs for files
     for(var file in fm){
-        var cleanFilePath;
-        if(file.match(/^\//)) cleanFilePath = file.slice(1); //if there is a leading slash remove it
+        var cleanFilePath, file_name;
+        // if(file.match(/^\//)) {
+        //     cleanFilePath = file.slice(1); //if there is a leading slash remove it
+        // }else {
+        //     cleanFilePath = file;
+        // }
+        cleanFilePath = file;
+        file_name = cleanFilePath.slice(cleanFilePath.lastIndexOf("/") + 1);
+
         var fileObj = {
             extra_file_data: StringView.bytesToBase64(fm[file]),
             sha1_hash: SHA1Generator.calcSHA1FromByte(fm[file]),
             data_length: fm[file].length,
-            rel_file_path: cleanFilePath
+            rel_file_path: cleanFilePath,
+            file_name: file_name
         };
         // Make sure it's a known file otherwise make an assumption about executable
         if(cleanFilePath in fi)
@@ -63,7 +71,7 @@ function asyncFileSaveTasks(fi, fm, cb){
             fileObj.is_executable = fi[cleanFilePath].isExecutable;
             fileObj.main_executable = fi[cleanFilePath].mainExecutable;
         }else{
-            var ext = cleanFilePath.split(".").pop();
+            var ext = file_name.split(".").pop();
             if(ext === "EXE" || ext == "exe")
             {
                 fileObj.is_executable = true;
@@ -71,7 +79,7 @@ function asyncFileSaveTasks(fi, fm, cb){
             }
         }
         self.postMessage({type:'stdout', 
-            message:"Creating file save for: " +cleanFilePath+ " with hash: " + fileObj.sha1_hash});
+            message:"Creating file save for path: " + cleanFilePath + " with file_name: "+ file_name + " hash: " + fileObj.sha1_hash});
         tasks.push(createFilePathPostTask(fileObj, uuid))
     }
 
@@ -112,9 +120,12 @@ onmessage = function(e){
     var data = e.data.data;
     
     var tasks = [
-        async.apply(asyncSaveStateRunLengthData, data.encodedObj),
-        async.apply(asyncFileSaveTasks, fi, fm)
+        async.apply(asyncSaveStateRunLengthData, data.encodedObj)
     ];
+    
+    if(fi && fm){
+       tasks.push(async.apply(asyncFileSaveTasks, fi, fm));
+    }
     
     async.series(tasks, function(err, results){
         self.postMessage({type:"finished", data: data})

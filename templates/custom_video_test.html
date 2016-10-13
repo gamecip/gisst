@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Custom Video Controls Test</title>
+    <style type="text/css">
+        #videoElement {
+            width: 480px;
+            height: 360px;
+        }
+
+        #videoContainer {
+            width: 480px;
+            height: 480px;
+            border: solid 1px blue;
+        }
+    </style>
+</head>
+<body>
+<div id="videoContainer">
+    <video id="videoElement" src="/static/test.mp4" type="video/mp4"></video>
+    <div id="videoControls"></div>
+</div>
+</body>
+<script src="/static/js/jquery-2.1.4.min.js"></script>
+<script src="/static/js/react-dom.js"></script>
+<script src="/static/js/react.js"></script>
+<script type="application/javascript">
+
+    var VideoControls = React.createClass({
+        displayName: "VideoControls"
+    });
+
+    ReactDOM.render(React.createElement({}), document.getElementById('videoControls'));
+</script>
+</html>
