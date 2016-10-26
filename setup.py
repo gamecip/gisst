@@ -22,10 +22,10 @@ setup(
         'hachoir-metadata',
         'hachoir-parser',
         'pytz',
-        'SQLAlchemy',
+        'SQLAlchemy==1.0.12',
         'youtube-dl',
         'Pillow',
-        'gnureadline',
+        'pyreadline',
         'requests',
         'Whoosh'
     ],
@@ -35,5 +35,9 @@ setup(
     ''',
     author="Eric Kaltman",
     author_email="ekaltman@gmail.com",
-    include_package_data=True
+    include_package_data=True,
+    package_data={
+        'static': 'citetool_editor/static/*',
+        'templates': 'citetool_editor/templates/*'
+    }
 )

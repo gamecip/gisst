@@ -6,12 +6,16 @@ import pytz
 import click
 import uuid
 import sqlite3
+import platform
+import sys
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.exc import ResourceClosedError
 from whoosh.fields import Schema, STORED, ID, KEYWORD, TEXT
 from whoosh.query import *
 from whoosh.qparser import QueryParser
 from whoosh.index import create_in, open_dir
+from whoosh.writing import AsyncWriter
 from datetime import datetime
 from functools import partial
 from collections import OrderedDict
@@ -23,15 +27,27 @@ from schema import (
 )
 from utils import bound_array
 
-LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
+#   This is needed for managing db connections in SQLite because Flask runs each
+#   session as a thread local
+#   Windows sqlalchemy api only uses three slashes, because of course
+if platform.system() == "Windows":
+    engine = create_engine("sqlite:///{}".format(DB_FILE_NAME))
+    LOCAL_DATA_ROOT = os.path.join(os.environ['APPDATA'], 'citetool-editor')
+elif platform.system() == "Darwin":
+    engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
+    LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
+elif platform.system() == "Linux":
+    engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
+    LOCAL_DATA_ROOT = os.path.expanduser("~/.citetool-editor")
+else:
+    print "This is not running on a supported system. Goodbye!"
+    sys.exit(1)
+
 DB_FILE_NAME = os.path.join(LOCAL_DATA_ROOT, 'cite.db')
 LOCAL_CITATION_DATA_STORE = os.path.join(LOCAL_DATA_ROOT, 'cite_data')
 LOCAL_GAME_DATA_STORE = os.path.join(LOCAL_DATA_ROOT, 'game_data')
 LOCAL_FTS_INDEX = os.path.join(LOCAL_DATA_ROOT, 'fts_index')
 
-#   This is needed for managing db connections in SQLite because Flask runs each
-#   session as a thread local
-engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
 
 #   Database utility functions, might move somewhere else if there are too many
 #   FOR NOW THERE ARE NO FOREIGN KEYS, to allow for them will need to add a
@@ -59,6 +75,8 @@ class DatabaseManager:
     GAME_SAVE_TABLE = 'game_save_table'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     SAVE_STATE_PERFORMANCE_LINK_TABLE = 'save_state_performance_link_table'
+    SCREEN_LINK_TABLE = 'screen_link_table'
+    GIF_LINK_TABLE = 'gif_link_table'
 
     #   Relations
     AND = ' and '
@@ -159,6 +177,20 @@ class DatabaseManager:
             ('save_state_uuid', 'text', field_constraint),
             ('time_index', 'integer', field_constraint),
             ('action', 'text', field_constraint) #    Action is "load" or "save"
+        ],
+        SCREEN_LINK_TABLE: [
+            ('uuid', 'text', field_constraint),
+            ('game_uuid', 'text', field_constraint),
+            ('save_state_uuid', 'text', field_constraint),
+            ('performance_uuid', 'text', field_constraint),
+            ('time_index', 'integer', field_constraint)
+        ],
+        GIF_LINK_TABLE: [
+            ('uuid', 'text', field_constraint),
+            ('game_uuid', 'text', field_constraint),
+            ('performance_uuid', 'text', field_constraint),
+            ('time_start_index', 'integer', field_constraint),
+            ('time_stop_index', 'integer', field_constraint)
         ]
     }
 
@@ -168,7 +200,9 @@ class DatabaseManager:
         PERFORMANCE_CITATION_TABLE: [x for x, _, _ in fields[PERFORMANCE_CITATION_TABLE]],
         GAME_FILE_PATH_TABLE: [x for x, _, _ in fields[GAME_FILE_PATH_TABLE]],
         GAME_SAVE_TABLE: [x for x, _, _ in fields[GAME_SAVE_TABLE]],
-        SAVE_STATE_PERFORMANCE_LINK_TABLE: [x for x, _, _ in fields[SAVE_STATE_PERFORMANCE_LINK_TABLE]]
+        SAVE_STATE_PERFORMANCE_LINK_TABLE: [x for x, _, _ in fields[SAVE_STATE_PERFORMANCE_LINK_TABLE]],
+        SCREEN_LINK_TABLE: [x for x, _, _ in fields[SCREEN_LINK_TABLE]],
+        GIF_LINK_TABLE: [x for x, _, _ in fields[GIF_LINK_TABLE]]
     }
 
     #   Full Text Search setup
@@ -242,9 +276,18 @@ class DatabaseManager:
             cls.db.rollback()
             print e.message
             return None
+
+        # At some point the sqlalchemy interface either changed or introduced a bug on table creation
+        # That returns an object for which fetchall() throws an error instead of returning a []
+        # This catch will also eat legitimate ResourceClosedErrors, but those are mostly threaded issues
+        # that we will probably not be particularly dealing with.
+        try:
+            res = result.fetchall()
+        except ResourceClosedError as e:
+            res = []
+
         # .commit() method is needed for changes to be saved, can create false positives in tests
         # if left out since current connection will return its changes, but other connections will not see them
-        res = result.fetchall()
         if commit:
             cls.db.commit()
         return res
@@ -286,8 +329,9 @@ class DatabaseManager:
     @classmethod
     def add_to_fts(cls, content, title=None, id=None, source_hash=None, tags=None):
         ix = open_dir(LOCAL_FTS_INDEX)
-        with ix.writer() as writer:
-            writer.add_document(content=content, title=title, id=id, source_hash=source_hash, tags=tags)
+        writer = AsyncWriter(ix)
+        writer.add_document(content=content, title=title, id=id, source_hash=source_hash, tags=tags)
+        writer.commit()
 
     @classmethod
     def check_for_table(cls, table_name):

@@ -539,10 +539,8 @@ def gif_performance(ctx, uuid, start, end, regenerate):
     gif_source_path = "'{}/{}/{}'".format(os.path.abspath(LOCAL_CITATION_DATA_STORE),
                                           perf['replay_source_file_ref'],
                                           perf['replay_source_file_name'])
-    gif_segment_dir = "{}_{}".format(start, end)
-    gif_abs_path = "{}/{}/gif/{}".format(os.path.abspath(LOCAL_CITATION_DATA_STORE),
-                                         perf['replay_source_file_ref'],
-                                         gif_segment_dir)
+    gif_abs_path = "{}/{}".format(os.path.abspath(LOCAL_CITATION_DATA_STORE),
+                                         perf['replay_source_file_ref'])
     gif_palette_name = "{}_{}_{}_palette.png".format(uuid, start, end)
     gif_file_name = "{}_{}_{}.gif".format(uuid, start, end)
 

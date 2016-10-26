@@ -942,9 +942,11 @@ class Z64Extractor(Extractor):
 
     def extract(self, options=None):
         try:
-            subprocess.call('ucon64')
-        except OSError:
-            return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
+            devnull = open(os.devnull)
+            subprocess.Popen(['ucon64'], stdout=devnull, stderr=devnull).communicate()
+        except OSError as e:
+            if e.errno == os.errno.ENOENT:
+                return ExtractorError("ucon64 not found, cannot extract {}".format(self.source))
 
         full_path = os.path.abspath(self.source)
 

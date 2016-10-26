@@ -184,7 +184,6 @@ def performance_info(uuid):
     perf_info['availablePerformances'] = [dict(p.get_element_items()) for p in dbm.retrieve_derived_performances(perf_ref['game_uuid'])]
     return jsonify(perf_info)
 
-
 @app.route("/play/<uuid>")
 def play_page(uuid):
     init_state = request.values.get('init_state')
@@ -196,14 +195,32 @@ def play_page(uuid):
         has_exec = dbm.retrieve_file_path(save_state_uuid=init_state['uuid'], main_executable=True)
     else:
         has_exec = dbm.retrieve_file_path(game_uuid=uuid, save_state_uuid=None, main_executable=True)
+        init_state = {'uuid': 'NO_ID'}
 
     if cite_ref and (cite_ref['data_image_source'] or has_exec):
         return render_template('play.html',
                                init_state=init_state,
-                               cite_ref=cite_ref,
-                               state_dicts=state_dicts,
-                               state_headers=dbm.headers[dbm.GAME_SAVE_TABLE])
+                               cite_ref=cite_ref)
     return "No game data source found, sorry!"
+
+@app.route("/compare")
+def compare_page():
+    uuids = request.values.get('uuids', "").split(',')
+    game_uuids = []
+    state_uuids = []
+    for id in uuids:
+        if dbm.retrieve_attr_from_db('uuid', id, dbm.GAME_CITATION_TABLE):
+            game_uuids.append(id)
+            state_uuids.append('NO_ID')
+        elif dbm.retrieve_attr_from_db('uuid', id, dbm.GAME_SAVE_TABLE):
+            state = dbm.retrieve_save_state(uuid=id)[0]
+            state_uuids.append(id)
+            game_uuids.append(state['game_uuid'])
+
+    return render_template('compare.html',
+                           game_uuids=",".join(game_uuids),
+                           state_uuids=",".join(state_uuids)
+                           )
 
 
 @app.route("/extra_file/<uuid>/add", methods=['POST'])
@@ -377,7 +394,7 @@ def performance_update(uuid):
     update_fields = json.loads(request.form.get('update_fields'))
     dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE, update_fields.keys(), update_fields.values(), ["uuid"], [uuid])
     perf_ref = dbm.retrieve_perf_ref(uuid)
-    dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [perf_ref.to_json_string()],["uuid"], [uuid])
+    #dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [perf_ref.to_json_string()],["uuid"], [uuid])
     return perf_ref.to_json_string()
 
 @app.route("/game/<uuid>/update", methods=['POST'])
@@ -385,7 +402,7 @@ def game_update(uuid):
     update_fields = json.loads(request.form.get('update_fields'))
     dbm.update_table(dbm.GAME_CITATION_TABLE, update_fields.keys(), update_fields.values(), ["uuid"], [uuid])
     game_ref = dbm.retrieve_game_ref(uuid)
-    dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [game_ref.to_json_string()], ["uuid"], [uuid])
+    #dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [game_ref.to_json_string()], ["uuid"], [uuid])
     return game_ref.to_json_string()
 
 @app.route("/performance/<uuid>/add", methods=['POST'])

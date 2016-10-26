@@ -1,5 +1,5 @@
 global-exclude *.pyc
-recursive-include citetool_editor/static *.js *.js.mem *.html *.conf *.ini *.data *.map
+recursive-include citetool_editor/static *.js *.js.mem *.html *.conf *.ini *.data *.map *.css
 recursive-include citetool_editor/templates *
 exclude citetool_editor/static/js/cite_game/.git
 exclude citetool_editor/static/js/cite_game/.gitignore

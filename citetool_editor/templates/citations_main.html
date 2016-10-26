@@ -7,8 +7,10 @@
 </head>
 <body>
 <h2>Game Citations</h2>
+<button id="compareButton" onclick="onCompareClick()">Compare!</button>
 <table class="cite-table">
     <tr class="cite-table-header-row">
+        <th class="header-select"></th>
         {% for header in game_headers if header in ('title', 'platform', 'developer', 'publisher', 'copyright_year') %}
             {% if header == 'title'%}
             <th class="header-title">{{header.capitalize()}}</th>
@@ -20,6 +22,7 @@
     </tr>
     {% for game in all_game_cites %}
         <tr class="cite-table-row">
+            <td><input id="{{ game.elements['uuid'] }}_checkbox" type="checkbox" onclick="onGameClick('{{game.elements['uuid']}}')"></td>
             {% for k, v in game.elements.items() if k in ('title', 'platform', 'developer', 'publisher', 'copyright_year') %}
                 {% if k == 'title'%}
                     <td class="cite-table-data"><a href="/citation/{{game.elements['uuid']}}">{{v}}</a></td>
@@ -61,4 +64,23 @@
     {% endfor %}
 </table>
 </body>
+<script type="application/javascript">
+    var selectedGames = [];
+    function onCompareClick(){
+        redirectURL = "/compare?uuids=";
+        for(var i=0; i < selectedGames.length; i++){
+            redirectURL += selectedGames[i] + ",";
+        }
+        window.location = redirectURL.slice(0, -1); //remove trailing comma
+    }
+
+    function onGameClick(id){
+        var index = selectedGames.indexOf(id);
+        if(index !== -1){
+            selectedGames.splice(index, 1);
+        }else{
+            selectedGames.push(id)
+        }
+    }
+</script>
 </html>
