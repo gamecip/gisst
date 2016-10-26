@@ -30,20 +30,21 @@ from utils import bound_array
 #   This is needed for managing db connections in SQLite because Flask runs each
 #   session as a thread local
 #   Windows sqlalchemy api only uses three slashes, because of course
+DB_FILE_NAME = os.path.join(LOCAL_DATA_ROOT, 'cite.db')
+
 if platform.system() == "Windows":
-    engine = create_engine("sqlite:///{}".format(DB_FILE_NAME))
     LOCAL_DATA_ROOT = os.path.join(os.environ['APPDATA'], 'citetool-editor')
+    engine = create_engine("sqlite:///{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
 elif platform.system() == "Darwin":
-    engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
     LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
+    engine = create_engine("sqlite:////{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
 elif platform.system() == "Linux":
-    engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
     LOCAL_DATA_ROOT = os.path.expanduser("~/.citetool-editor")
+    engine = create_engine("sqlite:////{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
 else:
     print "This is not running on a supported system. Goodbye!"
     sys.exit(1)
 
-DB_FILE_NAME = os.path.join(LOCAL_DATA_ROOT, 'cite.db')
 LOCAL_CITATION_DATA_STORE = os.path.join(LOCAL_DATA_ROOT, 'cite_data')
 LOCAL_GAME_DATA_STORE = os.path.join(LOCAL_DATA_ROOT, 'game_data')
 LOCAL_FTS_INDEX = os.path.join(LOCAL_DATA_ROOT, 'fts_index')
