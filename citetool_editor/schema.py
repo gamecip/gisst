@@ -20,10 +20,11 @@ import datetime
 import pprint
 from collections import OrderedDict
 
-GAME_CITE_REF = 'game'
-PERF_CITE_REF = 'performance'
-GAME_SCHEMA_VERSION = '0.1.0'
-PERF_SCHEMA_VERSION = '0.1.0'
+GAME_CITE_REF = u'game'
+PERF_CITE_REF = u'performance'
+STATE_CITE_REF = u'state'
+GAME_SCHEMA_VERSION = u'0.1.0'
+PERF_SCHEMA_VERSION = u'0.1.0'
 
 # Errors parked here
 class SchemaError(BaseException):
@@ -132,7 +133,7 @@ class CiteRef(object):
         #   Convert datetimes to strings for json encoding
         json_dict = dict(map(lambda x: (x[0], x[1].isoformat()) if isinstance(x[1], datetime.datetime) else (x[0], x[1]),
                         self.elements.items()))
-        return json.dumps(json_dict)
+        return unicode(json.dumps(json_dict))
 
     def to_pretty_string(self):
         return u"\n".join([u"{} : {}".format(e, v) for e, v in self.elements.items()])
@@ -148,6 +149,9 @@ class CiteRef(object):
             self.elements[key] = value
         else:
             raise KeyError('{} not found in cite reference elements.')
+
+    def __contains__(self, item):
+        return True if item in self.elements.keys() else False
 
 
 # Citation factory method

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Playing {{ cite_ref['title']}}</title>
+    <title>Comparing</title>
     <link href="/static/css/citetool_editor.css" rel="stylesheet" type="text/css">
     <script src="/static/js/jquery-2.1.4.min.js"></script>
     <script src="/static/js/react.js"></script>
@@ -18,7 +18,7 @@
     <script src="/static/js/ui-modules.js"></script>
     <script src="/static/js/play.js"></script>
 </head>
-<body data-game-uuid="{{ cite_ref['uuid'] }}" data-state-uuid="{{ init_state['uuid'] }}">
+<body data-ui-type="multi" data-game-uuids="{{game_uuids}}" data-state-uuids="{{state_uuids}}">
 <div id="uiBase"></div>
 </body>
 </html>

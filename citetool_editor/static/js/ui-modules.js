@@ -28,6 +28,21 @@ var UI = (function(){
     const GENERAL_STATUS_ALERT_EVENT = "generalStatusAlertEvent";
     const CONTEXT_UPDATE_EVENT = "contextUpdateEvent";
 
+    const MULTI_START_CLICK_EVENT = "multiStartClickEvent";
+    const MULTI_STOP_CLICK_EVENT = "multiStopClickEvent";
+    const MULTI_START_RECORD_CLICK_EVENT = "multiStartRecordClickEvent";
+    const MULTI_STOP_RECORD_CLICK_EVENT = "multiStopRecordClickEvent";
+    const MULTI_INPUT_ON_CLICK_EVENT = "multiInputOnClickEvent";
+    const MULTI_INPUT_OFF_CLICK_EVENT = "multiInputOffClickEvent";
+    const MULTI_AUDIO_OFF_CLICK_EVENT = "multiAudioOffClickEvent";
+    const MULTI_AUDIO_ON_CLICK_EVENT = "multiAudioOnClickEvent";
+    const MULTI_SAVE_STATE_CLICK_EVENT = "multiSaveStateClickEvent";
+
+    /*
+    Page Canonical DOM Element Ids, right now only for emulation target
+     */
+
+
     /*
     Form header information, mainly for display and update form exclusions
      */
@@ -50,14 +65,16 @@ var UI = (function(){
     }
 
     /*
+    * STYLES
     * All the style code needed to render layouts
     * */
 
+    //Single Emulation Styles
+
     var emulationAnalyzerStyle = {
-        border: 'solid 1px red',
+        //border: 'solid 1px red',
         width: '1300px',
         height: '800px'
-
     };
 
     var emulationComponentStyle = {
@@ -65,23 +82,25 @@ var UI = (function(){
         border: 'solid 1px lightgreen'
     };
 
-    var tabComponentStyle = {
-        width: '50%',
-        border: 'solid 1px lightblue'
-    };
-
-    //Emulation container will change size based on specific emulator
     var emulationContainerStyle = {
         width: "640px",
         height: "480px",
-        border: "solid 1px yellow"
+        //border: "solid 1px yellow",
+        display: "flex",
+        flexWrap: "wrap",
+        flexDirection: "row"
     };
 
     var emulationControlsStyle = {
 
     };
 
-    var stateListingStyle = {
+    var tabComponentStyle = {
+        width: '50%',
+        border: 'solid 1px lightblue'
+    };
+
+    var stateListingSingleStyle = {
         width: "100%",
         height: "180px",
         overflow: "scroll"
@@ -114,6 +133,114 @@ var UI = (function(){
         marginTop: "-50px"
     };
 
+    //Multi Emulation Styles
+
+    var multiEmulationAnalyzerStyle = {
+        border: 'solid 1px red',
+        width: '1300px',
+        height: '800px'
+    };
+
+    var multiEmulationComponentStyle = {
+        width:"50%",
+        height:"100%"
+    };
+
+    var multiEmulatorContainerStyle = {
+        width:"100%",
+        height:"598px",
+        border: "solid pink 1px",
+        overflowY: "scroll"
+    };
+
+    var multiEmulationControlsContainerStyle = {
+        height:"100px",
+        width:"100%",
+        border:"solid 1px black",
+        marginTop: "10px",
+        display: "flex",
+        flexDirection: "row"
+    };
+
+    var startMultiControlContainerStyle = {
+        display: "flex",
+        flexDirection:"row"
+    };
+
+    var recordMultiControlContainerStyle = {
+        display: "flex",
+        flexDirection:"row",
+        marginLeft: "15px"
+    };
+
+    var inputMultiControlContainerStyle = {
+        display: "flex",
+        flexDirection:"row",
+        marginLeft: "15px"
+    };
+
+    var audioMultiControlContainerStyle = {
+        display: "flex",
+        flexDirection:"row",
+        marginLeft: "15px"
+    };
+
+    var stateMultiControlContainerStyle = {
+        display: "flex",
+        flexDirection:"row",
+        marginLeft: "15px"
+    };
+
+    var controlContextSelectContainerStyle = {
+        listStyle: "none",
+        paddingLeft:"0px"
+    };
+
+    var controlOptionActive = {
+        color: "white",
+        backgroundColor: "blue"
+    };
+
+    var controlOptionInactive = {
+        color: "grey",
+        backgroundColor: "yellow"
+    };
+
+    var contextListingStyle = {
+        width:"50%",
+        height:"760px",
+        overflowY:"scroll"
+    };
+
+    var contextComponentStyle = {
+        height: "260px",
+        width: "610px",
+        display: "flex",
+        flexDirection: "row"
+    };
+
+    var contextStatusStyle = {
+        height: "100%",
+        width: "20px",
+        paddingLeft: "5px"
+    };
+
+    var stateListingMultiStyle = {
+        width: "100%",
+        height: "180px",
+        overflow: "scroll"
+    };
+
+    var searchBarContainerStyle = {
+        height:"30px",
+        width:"100%"
+    };
+
+    var searchBarInputStyle = {
+        height:"100%",
+        width:"95%"
+    };
+
     var performanceListingStyle = {
         width: "100%",
         height: "180px",
@@ -137,8 +264,13 @@ var UI = (function(){
     };
 
     var gameFileListingStyle = {
-        overflow: "scroll",
-        height: "450px"
+        overflowY: "scroll",
+        height: "100%"
+    };
+
+    var gamePanelMultiStyle = {
+        display: "flex",
+        flexFlow: "row"
     };
 
     var performanceReviewStyle = {
@@ -158,7 +290,7 @@ var UI = (function(){
     };
 
     /*
-     * Analyzer UI Code
+     * Single Analyzer UI Code
      * Structure:
      * Emulation Analyzer
      *   Title
@@ -262,8 +394,357 @@ var UI = (function(){
                         React.createElement(StatusBar, {alerts: this.state.statusAlerts})
                     ),
                     React.createElement('div', {style: {display: 'flex', flexFlow: 'row'}},
-                        React.createElement(EmulationComponent, {contextId: this.props.contextId, selectedState: this.state.selectedState, selectedPerformance: this.state.selectedPerformance}),
-                        React.createElement(TabComponent, {contextId: this.props.contextId, selectedPerformance: this.state.selectedPerformance})
+                        React.createElement(EmulationComponent, {contextId: this.props.contextId, selectedState: this.state.selectedState, selectedPerformance: this.state.selectedPerformance, uiType: CiteManager.SINGLE}),
+                        React.createElement(TabComponent, {contextId: this.props.contextId, selectedPerformance: this.state.selectedPerformance, uiType: CiteManager.SINGLE})
+                    )
+                )
+            )
+        }
+    });
+
+    /*
+     * Multi Analyzer UI Code
+     * Structure:
+     * Multi Emulation Analyzer
+     *   Title
+     *   StatusBar
+     *   AnalyzerComponent
+     *       MultiEmulationComponent
+     *           Add Game Search Bar
+     *           Emulation Controls
+     *           EmulationContainer
+     *       ContextListing
+     *          ContextComponent
+     *              TabComponent
+     *                  Game
+     *                      InfoTable
+     *                  State
+     *                      InfoTable
+     *                      StateListing
+     *                  Performance
+     *                      InfoTable
+     *                      PerformanceReview
+     *
+     *  UI components, nesting listed above here
+     * */
+
+    var MultiEmulationAnalyzer = React.createClass({
+        dispatchStatusEvent: function(node, message, statusType){
+            node.dispatchEvent(new CustomEvent(ADD_STATUS_ALERT_EVENT, {detail: {message: message, statusType: statusType}, 'bubbles': true, 'cancelable': true}))
+        },
+        getInitialState: function (){
+            var alerts = [];
+            var state = {
+                update: false,
+                statusAlerts: alerts,
+                statusCounter: 0
+            };
+            return state;
+        },
+        update: function(){
+            this.setState({update: !this.state.update});
+        },
+        componentDidMount: function(){
+            var node = ReactDOM.findDOMNode(this);
+            var me = this;
+            node.addEventListener(MULTI_AUDIO_OFF_CLICK_EVENT, function(e){
+                e.detail.forEach(function(id){
+                    var ctx = CiteManager.getContextById(id);
+                    if(ctx.emu) ctx.emu.setMuted(true);
+                    me.update();
+                })
+            }, this);
+
+            node.addEventListener(MULTI_AUDIO_ON_CLICK_EVENT, function(e){
+                e.detail.forEach(function(id){
+                    var ctx = CiteManager.getContextById(id);
+                    if(ctx.emu) ctx.emu.setMuted(false);
+                    me.update();
+                })
+            }, this);
+
+            node.addEventListener(MULTI_INPUT_OFF_CLICK_EVENT, function(e){
+                e.detail.forEach(function(id){
+                    var ctx = CiteManager.getContextById(id);
+                    if(ctx.emu) ctx.emu.turnOffInput();
+                    me.update();
+                })
+            }, this);
+
+            node.addEventListener(MULTI_INPUT_ON_CLICK_EVENT, function(e){
+                e.detail.forEach(function(id){
+                    var ctx = CiteManager.getContextById(id);
+                    if(ctx.emu) ctx.emu.turnOnInput();
+                    me.update();
+                })
+            }, this);
+
+            node.addEventListener(MULTI_START_RECORD_CLICK_EVENT, function(e){
+                var contextIds = e.detail;
+
+                for(var i = 0; i < contextIds.length; i++){
+                    var ctx = CiteManager.getContextById(contextIds[i]);
+                    if(!ctx.recording){
+                        CiteManager.startRecording(contextIds[i], function(c){
+                            me.dispatchStatusEvent(node, "Started recording performance: " + c.currentPerformance.record.uuid, START_RECORDING_STATUS_EVENT);
+                            me.update();
+                        }.bind(this), function(err, c){}.bind(this))
+                    }
+                }
+            }, this);
+
+            node.addEventListener(MULTI_STOP_RECORD_CLICK_EVENT, function(e){
+                var contextIds = e.detail;
+
+                for(var i = 0; i < contextIds.length; i++){
+                    var ctx = CiteManager.getContextById(contextIds[i]);
+                    if(!ctx.recording){
+                        me.dispatchStatusEvent(node, "Stopped recording (called) for context " + contextIds[i], STOP_RECORDING_CALLED_STATUS_EVENT);
+                        CiteManager.stopRecording(contextIds[i], function(c){
+                            me.dispatchStatusEvent(node, "Stopped recording (complete) for context " + contextIds[i], STOP_RECORDING_COMPLETE_STATUS_EVENT);
+                            me.update();
+                        }.bind(this), function(err, c){}.bind(this))
+                    }
+                }
+            }, this);
+
+            node.addEventListener(MULTI_START_CLICK_EVENT, function(e){
+                //Check if there are already running emulations
+                //if so, add them to the total including incoming emulation start ups
+                //This code will not be able to resize running emulations, so if you cross
+                //a threshold of 1->2, or 4->5, you are better off just starting with that many
+                //and not trying to add more
+                var totalTargetContexts = e.detail.length;
+                for(var x = 0; x < CiteManager.activeContexts().length; x++){
+                    if(e.detail.indexOf(CiteManager.activeContexts()[x]) == -1){
+                        totalTargetContexts++;
+                    }
+                }
+
+                for(var i=0; i < e.detail.length; i++){
+                    var ctx = CiteManager.getContextById(e.detail[i]);
+                    if(!ctx.emu || !ctx.emu.canvas || !document.getElementById(ctx.emu.canvas.id) || !ctx.emu.recording){
+                        var options = {};
+                        // Bargain basement view management here and below, basically if there are multiple
+                        // active contexts, put 2 next to each other, 3-4 in a 2x2 grid, 5-9 in 3x3 grid
+                        // hopefully we don't have a reason for more than 9 instances (also browser probably can't
+                        // take it, so we'll test and limit based on emulation
+                        if(totalTargetContexts > 1){
+                            options.width = 320;
+                            options.height = 240;
+                        }else if(totalTargetContexts > 4){
+                            options.width = 212;
+                            options.height = 160;
+                        }
+                        if(ctx.lastState){
+                            CiteManager.startEmulationWithState(ctx.id, ctx.lastState.record.uuid, function(){
+                                me.update();
+                            }.bind(this), options)
+                        }else{
+                            CiteManager.startEmulation(ctx.id, function(){
+                                me.update();
+                            }.bind(this), options)
+                        }
+                    }
+                }
+            }, this);
+
+            node.addEventListener(MULTI_STOP_CLICK_EVENT, function(e){
+                e.detail.forEach(function(id){
+                    var ctx = CiteManager.getContextById(id);
+                    if(ctx.emu) ctx.emu.quit();
+                    me.update();
+                });
+            }, this);
+
+            node.addEventListener(MULTI_SAVE_STATE_CLICK_EVENT, function(e){
+                e.detail.forEach(function(id){
+                    var ctx = CiteManager.getContextById(id);
+                    if(ctx.emu){
+                        me.dispatchStatusEvent(node, "Saving state for instance " + ctx.emu.instanceID, SAVE_STATE_START_STATUS_EVENT);
+                        console.log("Saving for ctx: " + ctx.id);
+                        CiteManager.saveState(id, function(c){
+                            console.log("Saved for ctx: " + ctx.id);
+                            me.update();
+                            me.dispatchStatusEvent(node, "State saved for instance " + ctx.emu.instanceID, SAVE_STATE_FINISH_STATUS_EVENT);
+                        }.bind(this))
+                    }
+                }, this);
+            }, this);
+        },
+        render: function (){
+            return (
+                React.createElement('div', {style: multiEmulationAnalyzerStyle},
+                    React.createElement('div', {style: {display: 'flex', flexFlow: 'row'}},
+                        React.DOM.h3({style: {width: "25%"}}, React.DOM.a({href:'/citations'}, "Analyzer")),
+                        React.createElement(StatusBar, {alerts: this.state.statusAlerts})
+                    ),
+                    React.createElement('div', {style: {display: 'flex', flexFlow: 'row'}},
+                        React.createElement(MultiEmulationComponent, {contextIds: this.props.contextIds}),
+                        React.createElement(ContextListing, {contextIds: this.props.contextIds})
+                    )
+
+                )
+            )
+        }
+    });
+
+    var MultiEmulationComponent = React.createClass({
+        render: function (){
+            return (
+                React.createElement('div', {style:multiEmulationComponentStyle},
+                    React.createElement(AddSearchBar, {}),
+                    React.createElement(MultiEmulationControls, {contextIds: this.props.contextIds}),
+                    React.DOM.div({id: "emulationContainer", style:multiEmulatorContainerStyle})
+                )
+            )
+        }
+    });
+
+    var AddSearchBar = React.createClass({
+        getInitialState:function(){ return {val: ""}},
+        onSearchChange: function(e){
+            var val = e.currentTarget.value;
+            this.setState({val:val});
+        },
+        render: function(){
+            var me = this;
+            return (
+                React.DOM.div({id:'addSearchBarHolder', style:searchBarContainerStyle},
+                    React.DOM.input({type: 'text', name: 'searchBar', val: me.state.val, onChange: me.onSearchChange, style:searchBarInputStyle})
+                )
+            )
+        }
+    });
+
+    var MultiEmulationControls = React.createClass({
+        grabCheckBoxes: function(className){
+            var affectedContexts = [];
+            var cboxes = document.getElementsByClassName(className);
+            for(var i=0; i < cboxes.length; i++){
+                if(cboxes[i].checked){
+                    affectedContexts.push(cboxes[i].id.split("_")[1])
+                }
+            }
+            return affectedContexts;
+        },
+        dispatchControlEvent: function(eventName, affectedContexts){
+            var node = ReactDOM.findDOMNode(this);
+            node.dispatchEvent(new CustomEvent(eventName, {detail: affectedContexts, 'bubbles': true, 'cancelable': true}));
+        },
+        onStartClick: function(){
+            this.dispatchControlEvent(MULTI_START_CLICK_EVENT, this.grabCheckBoxes('start-control-checkbox'));
+        },
+        onStopClick: function(){
+            this.dispatchControlEvent(MULTI_STOP_CLICK_EVENT, this.grabCheckBoxes('start-control-checkbox'));
+        },
+        onRecordClick: function(){
+            this.dispatchControlEvent(MULTI_START_RECORD_CLICK_EVENT, this.grabCheckBoxes('record-control-checkbox'));
+        },
+        onStopRecordClick: function(){
+            this.dispatchControlEvent(MULTI_STOP_RECORD_CLICK_EVENT, this.grabCheckBoxes('record-control-checkbox'));
+        },
+        onInputOnClick: function(){
+            this.dispatchControlEvent(MULTI_INPUT_ON_CLICK_EVENT, this.grabCheckBoxes('input-control-checkbox'));
+        },
+        onInputOffClick: function(){
+            this.dispatchControlEvent(MULTI_INPUT_OFF_CLICK_EVENT, this.grabCheckBoxes('input-control-checkbox'));
+        },
+        onMuteClick: function(){
+            this.dispatchControlEvent(MULTI_AUDIO_OFF_CLICK_EVENT, this.grabCheckBoxes('audio-control-checkbox'));
+        },
+        onUnMuteClick: function(){
+            this.dispatchControlEvent(MULTI_AUDIO_ON_CLICK_EVENT, this.grabCheckBoxes('audio-control-checkbox'));
+        },
+        onStateSaveClick: function(){
+            this.dispatchControlEvent(MULTI_SAVE_STATE_CLICK_EVENT, this.grabCheckBoxes('state-control-checkbox'));
+        },
+        render: function (){
+            var me = this;
+            return (
+                React.DOM.div({style:multiEmulationControlsContainerStyle},
+                    React.DOM.div({style:startMultiControlContainerStyle},
+                        React.DOM.div({style:{display:"flex",flexDirection:"column"}},
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onStartClick}, "Start"),
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onStopClick}, "Stop")
+                        ),
+                        React.DOM.div({},
+                            React.DOM.ul({style:controlContextSelectContainerStyle},
+                                this.props.contextIds.map(function(item){
+                                    var ctx = CiteManager.getContextById(item);
+                                    return React.DOM.li({key:"startControlContextContainer_"+item},
+                                        React.DOM.input({className: "start-control-checkbox", id:"startControlContextInput_" + item, type:"checkbox"}),
+                                        React.DOM.span({style: ctx.emu && ctx.emu.canvas && document.getElementById(ctx.emu.canvas.id) ? controlOptionActive : controlOptionInactive}, "Game " + item)
+                                    )
+                                }, this)
+                            )
+                        )
+                    ),
+                    React.DOM.div({style:recordMultiControlContainerStyle},
+                        React.DOM.div({style:{display:"flex",flexDirection:"column"}},
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onRecordClick}, "Record"),
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onStopRecordClick}, "Stop")
+                        ),
+                        React.DOM.div({},
+                            React.DOM.ul({style:controlContextSelectContainerStyle},
+                                this.props.contextIds.map(function(item){
+                                    var ctx = CiteManager.getContextById(item);
+                                    return React.DOM.li({key:"recordControlContextContainer_"+item},
+                                        React.DOM.input({type:"checkbox", className:"record-control-checkbox", id:"recordControlContextInput_" + item}),
+                                        React.DOM.span({style: ctx.emu && ctx.emu.recording ? controlOptionActive : controlOptionInactive}, "Game " + item)
+                                    )
+                                }, this)
+                            )
+                        )
+                    ),
+                    React.DOM.div({style:inputMultiControlContainerStyle},
+                        React.DOM.div({style:{display:"flex",flexDirection:"column"}},
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onInputOnClick}, "I On"),
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onInputOffClick}, "I Off")
+                        ),
+                        React.DOM.div({},
+                            React.DOM.ul({style:controlContextSelectContainerStyle},
+                                this.props.contextIds.map(function(item){
+                                    var ctx = CiteManager.getContextById(item);
+                                    return React.DOM.li({key:"inputControlContextContainer_"+item},
+                                        React.DOM.input({className:"input-control-checkbox", id:"inputControlContextInput_"+item, type:"checkbox"}),
+                                        React.DOM.span({style: ctx.emu && ctx.emu.canvas && document.getElementById(ctx.emu.canvas.id) && ctx.emu.inputActive ? controlOptionActive : controlOptionInactive}, "Game " + item)
+                                    )
+                                }, this)
+                            )
+                        )
+                    ),
+                    React.DOM.div({style:audioMultiControlContainerStyle},
+                        React.DOM.div({style:{display:"flex",flexDirection:"column"}},
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onUnMuteClick}, "A On"),
+                            React.DOM.button({style:{height:'50%'}, onClick: me.onMuteClick}, "A Off")
+                        ),
+                        React.DOM.div({},
+                            React.DOM.ul({style:controlContextSelectContainerStyle},
+                                this.props.contextIds.map(function(item){
+                                    var ctx = CiteManager.getContextById(item);
+                                    return React.DOM.li({key:"audioControlContextContainer_"+item},
+                                        React.DOM.input({className:"audio-control-checkbox", id:"audioControlContextInput_"+item, type:"checkbox"}),
+                                        React.DOM.span({style: ctx.emu && !ctx.emu.isMuted() ? controlOptionActive : controlOptionInactive}, "Game " + item)
+                                    )
+                                }, this)
+                            )
+                        )
+                    ),
+                    React.DOM.div({style:stateMultiControlContainerStyle},
+                        React.DOM.div({style:{display:"flex",flexDirection:"column"}},
+                            React.DOM.button({style:{height:"100%"}, onClick: me.onStateSaveClick}, "Save")
+                        ),
+                        React.DOM.div({},
+                            React.DOM.ul({style:controlContextSelectContainerStyle},
+                                this.props.contextIds.map(function(item){
+                                    return React.DOM.li({key:"stateControlContextContainer_"+item},
+                                        React.DOM.input({className:"state-control-checkbox", id:"stateControlContextInput_"+item, type:"checkbox"}),
+                                        React.DOM.span({}, "Game " + item)
+                                    )
+                                }, this)
+                            )
+                        )
                     )
                 )
             )
@@ -381,7 +862,7 @@ var UI = (function(){
         render: function (){
             return (
                 React.createElement('div', {style: emulationComponentStyle},
-                    React.createElement(EmulationContainer, {id: this.props.contextId + "_emulationContainer"}),
+                    React.createElement('div', {id: this.props.contextId + "_emulationContainer", style:emulationContainerStyle}),
                     React.createElement(EmulationControls, {
                         started: this.state.startedEmulation,
                         recording: this.state.isRecording,
@@ -394,25 +875,14 @@ var UI = (function(){
                                 React.createElement(Tab, {}, "Available Performances")
                             ),
                             React.createElement(TabPanel, {},
-                                React.createElement(StateListing, {started: this.state.startedEmulation, selectedState: this.props.selectedState, availableStates: this.state.availableStates})
+                                React.createElement(StateListing, {started: this.state.startedEmulation, selectedState: this.props.selectedState, availableStates: this.state.availableStates, uiType: this.props.uiType})
                             ),
                             React.createElement(TabPanel, {},
-                                React.createElement(PerformanceListing, {availablePerformances: this.state.availablePerformances, selectedPerformance: this.props.selectedPerformance})
+                                React.createElement(PerformanceListing, {availablePerformances: this.state.availablePerformances, selectedPerformance: this.props.selectedPerformance, uiType: this.props.uiType})
                             )
                         )
                     )
                 )
-            )
-        }
-    });
-
-    var EmulationContainer = React.createClass({
-        shouldComponentUpdate: function(){
-            return false; //this needs to be false, we can't have React destroy the running emulation instance
-        },
-        render: function (){
-            return (
-                React.DOM.div({id: this.props.id, style:emulationContainerStyle}, "EmulationContainer")
             )
         }
     });
@@ -454,7 +924,7 @@ var UI = (function(){
         displayName: "StateListing",
         render: function (){
             return (
-                React.DOM.div({style:stateListingStyle},
+                React.DOM.div({style: this.props.uiType === CiteManager.SINGLE ? stateListingSingleStyle : stateListingMultiStyle},
                     this.props.availableStates.map(function(s){
                         return React.createElement(StateItem, {key:'StateItem_' + s.uuid,record: s, started: this.props.started, selected: this.props.selectedState === s.uuid })
                     }.bind(this))
@@ -534,6 +1004,107 @@ var UI = (function(){
     var TabList = ReactTabs.TabList;
     var TabPanel = ReactTabs.TabPanel;
 
+    var ContextListing = React.createClass({
+        displayName: "ContextListing",
+        getInitialState: function(){
+            return null;
+        },
+        render: function(){
+            return (
+                React.DOM.div({style:contextListingStyle},
+                    this.props.contextIds.map(function (id){
+                        return React.createElement(ContextComponent, {key: "contextComponent_" + id, contextId: id})
+                    }, this)
+                )
+            )
+        }
+    });
+
+    var ContextComponent = React.createClass({
+        displayName: "ContextComponent",
+        getInitialState: function(){
+            var ctx = CiteManager.getContextById(this.props.contextId);
+            var state = {};
+            state.currentGameRecord = ctx.currentGame.record;
+            state.currentGameFiles = ctx.currentGame.fileInformation;
+            if(ctx.lastState){
+                state.lastSelectedStateRecord = ctx.lastState.record;
+                state.lastStateId = ctx.lastState.record.uuid;
+            }
+            state.lastSelectedPerfRecord = null;
+            state.lastSelectPerformanceId = null;
+            state.availableStates = ctx.availableStates;
+            state.availablePerformances = ctx.availablePerformances;
+            return state;
+        },
+        componentDidMount: function(){
+            var node = ReactDOM.findDOMNode(this);
+            var me = this;
+
+            node.addEventListener(STATE_SELECT_CLICK_EVENT, function(e){
+                CiteManager.loadState(this.props.contextId, e.detail, function(c){
+                    me.setState({
+                        lastSelectedStateRecord: c.lastState.record,
+                        lastStateId: e.detail
+                    })
+                })
+            }.bind(this));
+
+            node.addEventListener(PERF_SELECT_CLICK_EVENT, function(e){
+                var ctx = CiteManager.getContextById(this.props.contextId);
+                this.setState({
+                    lastSelectedPerfRecord: ctx.availablePerformances.filter(function(item){ return item.uuid === e.detail})[0],
+                    lastSelectedPerformanceId: e.detail
+                })
+            }.bind(this));
+        },
+        componentWillReceiveProps: function(nextProps){
+            var ctx = CiteManager.getContextById(nextProps.contextId);
+            this.setState({
+                availableStates: ctx.availableStates,
+                availablePerformances: ctx.availablePerformances,
+                running: ctx.emu && ctx.emu.canvas && document.getElementById(ctx.emu.canvas.id) ? true : false,
+                recording: ctx.emu ? ctx.emu.recording : false,
+                inputting: ctx.emu ? ctx.emu.inputActive : false,
+                muted: ctx.emu ? ctx.emu.isMuted() : false
+            })
+        },
+        render: function(){
+            return (
+                React.createElement('div', {style: contextComponentStyle},
+                    React.createElement('div', {style: contextStatusStyle},
+                        React.DOM.p({}, this.props.contextId)
+                    ),
+                    React.createElement(Tabs, {},
+                        React.createElement(TabList, {},
+                            React.createElement(Tab, {}, "Game"),
+                            React.createElement(Tab, {}, "State"),
+                            React.createElement(Tab, {}, "Performance"),
+                            React.createElement(Tab, {}, "Real Time Analytics")
+                        ),
+                        React.createElement(TabPanel, {},
+                            React.DOM.div({style:gamePanelMultiStyle},
+                                React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'game', id: this.state.currentGameRecord.uuid, record: this.state.currentGameRecord}),
+                                React.createElement(GameFileListing, {fileInformation: this.state.currentGameFiles})
+                            )
+                        ),
+                        React.createElement(TabPanel, {},
+                            React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'state', id: this.state.lastStateId, record: this.state.lastSelectedStateRecord}),
+                            React.createElement(StateListing, {started: this.state.running, uiType: this.props.uiType, selectedState: this.state.lastStateId, availableStates:this.state.availableStates})
+                        ),
+                        React.createElement(TabPanel, {},
+                            React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'performance', id: this.state.lastSelectPerformanceId, record: this.state.lastSelectedPerfRecord}),
+                            React.createElement(PerformanceListing, {uiType: this.props.uiType, availablePerformances: this.state.availablePerformances})
+                        ),
+                        React.createElement(TabPanel, {},
+                            React.DOM.h1({}, "Heap Information Here")
+                        )
+                    )
+                )
+            )
+        }
+    });
+
     var TabComponent = React.createClass({
         displayName: "TabComponent",
         getInitialState: function(){
@@ -568,8 +1139,12 @@ var UI = (function(){
         },
         render: function(){
             var perfURL = "";
+            var screenURL = "";
             if(this.state.lastSelectedPerfRecord){
                 perfURL = "/cite_data/" + this.state.lastSelectedPerfRecord.replay_source_file_ref + "/" + this.state.lastSelectedPerfRecord.replay_source_file_name;
+            }
+            if(this.state.lastSelectedStateRecord){
+                screenURL = "/cite_data/" + this.state.lastSelectedStateRecord.uuid + "/screen_" + this.state.lastSelectedStateRecord.uuid + ".png";
             }
             return (
                 React.createElement('div', {style:tabComponentStyle},
@@ -585,6 +1160,7 @@ var UI = (function(){
                             React.createElement(GameFileListing, {fileInformation: this.state.currentGameFiles})
                         ),
                         React.createElement(TabPanel, {},
+                            React.DOM.img({src:screenURL}),
                             React.createElement(InfoTable, {contextId: this.props.contextId, recordType: 'state', id: this.state.lastStateId, record: this.state.lastSelectedStateRecord})
                         ),
                         React.createElement(TabPanel, {},
@@ -691,7 +1267,7 @@ var UI = (function(){
             return (
                 React.DOM.ul({}, this.itemize(this.state.formData).map(function(i){
                     var key = i[0];
-                    var val = i[1] ? i[1] : undefined;
+                    var val = i[1] ? i[1] : '';
                     if(DISPLAY_FIELDS.indexOf(key) !== -1){
                         if(me.state.editable && UPDATE_EXCLUDED_FIELDS.indexOf(key) == -1){
                             return React.DOM.li({key:'infoItem_' + me.props.id + "_" + key}, snakeToTitle(key) + " : ", React.DOM.input({type: 'text', name: key, value: val, onChange: me.infoItemChange}));
@@ -724,8 +1300,11 @@ var UI = (function(){
     });
 
     return {
-        createUI: function(rootDiv, contextId){
+        createSingleUI: function(rootDiv, contextId){
             ReactDOM.render(React.createElement(EmulationAnalyzer, {contextId: contextId}), rootDiv)
+        },
+        createMultiUI: function(rootDiv, contextIds){
+            ReactDOM.render(React.createElement(MultiEmulationAnalyzer, {contextIds: contextIds}), rootDiv)
         }
     }
 

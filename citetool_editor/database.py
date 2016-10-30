@@ -1,13 +1,21 @@
 __author__ = 'erickaltman'
 
-from pysqlite2 import dbapi2 as sqlite3
 import os
 import json
 import pytz
 import click
 import uuid
+import sqlite3
+import platform
+import sys
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.exc import ResourceClosedError
+from whoosh.fields import Schema, STORED, ID, KEYWORD, TEXT
+from whoosh.query import *
+from whoosh.qparser import QueryParser
+from whoosh.index import create_in, open_dir
+from whoosh.writing import AsyncWriter
 from datetime import datetime
 from functools import partial
 from collections import OrderedDict
@@ -19,22 +27,28 @@ from schema import (
 )
 from utils import bound_array
 
-LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
-DB_FILE_NAME = '{}/cite.db'.format(LOCAL_DATA_ROOT)
-DB_TEST_FILE_NAME = 'test_cite.db'
-LOCAL_CITATION_DATA_STORE = '{}/cite_data'.format(LOCAL_DATA_ROOT)
-LOCAL_GAME_DATA_STORE = '{}/game_data'.format(LOCAL_DATA_ROOT)
-
 #   This is needed for managing db connections in SQLite because Flask runs each
 #   session as a thread local
-engine = create_engine("sqlite:////{}".format(DB_FILE_NAME))
+#   Windows sqlalchemy api only uses three slashes, because of course
 
-#   We need to load the FTS extension for each connection
-#   This event listener does that for each connection, regardless of whether it requires it
-@event.listens_for(engine, "connect")
-def connect(dbapi_connection, connection_rec):
-    dbapi_connection.enable_load_extension(True)
-    dbapi_connection.load_extension(DatabaseManager.FTS_EXT_PATH)
+if platform.system() == "Windows":
+    LOCAL_DATA_ROOT = os.path.join(os.environ['APPDATA'], 'citetool-editor')
+    engine = create_engine("sqlite:///{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
+elif platform.system() == "Darwin":
+    LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
+    engine = create_engine("sqlite:////{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
+elif platform.system() == "Linux":
+    LOCAL_DATA_ROOT = os.path.expanduser("~/.citetool-editor")
+    engine = create_engine("sqlite:////{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
+else:
+    print "This is not running on a supported system. Goodbye!"
+    sys.exit(1)
+
+DB_FILE_NAME = os.path.join(LOCAL_DATA_ROOT, 'cite.db')
+LOCAL_CITATION_DATA_STORE = os.path.join(LOCAL_DATA_ROOT, 'cite_data')
+LOCAL_GAME_DATA_STORE = os.path.join(LOCAL_DATA_ROOT, 'game_data')
+LOCAL_FTS_INDEX = os.path.join(LOCAL_DATA_ROOT, 'fts_index')
+
 
 #   Database utility functions, might move somewhere else if there are too many
 #   FOR NOW THERE ARE NO FOREIGN KEYS, to allow for them will need to add a
@@ -62,8 +76,8 @@ class DatabaseManager:
     GAME_SAVE_TABLE = 'game_save_table'
     PERFORMANCE_CITATION_TABLE = 'performance_citation'
     SAVE_STATE_PERFORMANCE_LINK_TABLE = 'save_state_performance_link_table'
-    FTS_INDEX_TABLE = 'fts_index_table'
-    FTS_EXT_PATH = '{}/fts5.dylib'.format(LOCAL_DATA_ROOT)
+    SCREEN_LINK_TABLE = 'screen_link_table'
+    GIF_LINK_TABLE = 'gif_link_table'
 
     #   Relations
     AND = ' and '
@@ -72,12 +86,6 @@ class DatabaseManager:
     _constraints = []
 
     fields = {
-        FTS_INDEX_TABLE: [
-            ('uuid',                '',                 no_constraint),
-            ('source_hash',         '',                 no_constraint),
-            ('source_type',         '',                 no_constraint),
-            ('content',             '',                 no_constraint)
-        ],
         EXTRACTED_TABLE: [
             ('id',                  'integer primary key',  field_constraint),
             ('title',               'text',                 field_constraint),
@@ -170,19 +178,36 @@ class DatabaseManager:
             ('save_state_uuid', 'text', field_constraint),
             ('time_index', 'integer', field_constraint),
             ('action', 'text', field_constraint) #    Action is "load" or "save"
+        ],
+        SCREEN_LINK_TABLE: [
+            ('uuid', 'text', field_constraint),
+            ('game_uuid', 'text', field_constraint),
+            ('save_state_uuid', 'text', field_constraint),
+            ('performance_uuid', 'text', field_constraint),
+            ('time_index', 'integer', field_constraint)
+        ],
+        GIF_LINK_TABLE: [
+            ('uuid', 'text', field_constraint),
+            ('game_uuid', 'text', field_constraint),
+            ('performance_uuid', 'text', field_constraint),
+            ('time_start_index', 'integer', field_constraint),
+            ('time_stop_index', 'integer', field_constraint)
         ]
     }
 
     headers = {
         EXTRACTED_TABLE: ('id', 'title', 'source_uri', 'extracted_datetime', 'source_file_hash', 'metadata'),
-        FTS_INDEX_TABLE: ('uuid', 'source_hash', 'source_type', 'content'),
         GAME_CITATION_TABLE: [x for x, _, _ in fields[GAME_CITATION_TABLE]],
         PERFORMANCE_CITATION_TABLE: [x for x, _, _ in fields[PERFORMANCE_CITATION_TABLE]],
         GAME_FILE_PATH_TABLE: [x for x, _, _ in fields[GAME_FILE_PATH_TABLE]],
         GAME_SAVE_TABLE: [x for x, _, _ in fields[GAME_SAVE_TABLE]],
-        SAVE_STATE_PERFORMANCE_LINK_TABLE: [x for x, _, _ in fields[SAVE_STATE_PERFORMANCE_LINK_TABLE]]
+        SAVE_STATE_PERFORMANCE_LINK_TABLE: [x for x, _, _ in fields[SAVE_STATE_PERFORMANCE_LINK_TABLE]],
+        SCREEN_LINK_TABLE: [x for x, _, _ in fields[SCREEN_LINK_TABLE]],
+        GIF_LINK_TABLE: [x for x, _, _ in fields[GIF_LINK_TABLE]]
     }
 
+    #   Full Text Search setup
+    fts_schema = Schema(title=TEXT(stored=True), content=TEXT, id=ID(stored=True), source_hash=ID(stored=True), tags=KEYWORD(stored=True))
 
     @classmethod
     def delete_db(cls):
@@ -217,16 +242,11 @@ class DatabaseManager:
                 click.echo("Table '{}' not found, creating...".format(table))
                 cls.create_table(table, cls.fields[table])
 
-        if not cls.check_for_table(cls.FTS_INDEX_TABLE):
+        #   Create FTS_index
+        if not os.path.exists(LOCAL_FTS_INDEX):
             click.echo("Full text search index not found, creating...")
-            cls.create_fts_table(cls.FTS_INDEX_TABLE, cls.fields[cls.FTS_INDEX_TABLE])
-
-    @classmethod
-    def create_fts_table(cls, fts_table, fields):
-        query = "create virtual table {} using fts5 ({}, tokenize='porter unicode61')".format(
-            fts_table,
-            ", ".join(["{}".format(z(f, t)) for f, t, z in fields]))
-        return cls.run_query(query)
+            os.mkdir(LOCAL_FTS_INDEX)
+            create_in(LOCAL_FTS_INDEX, schema=cls.fts_schema)
 
     @classmethod
     def insert_into_table(cls, table_name, keys, values):
@@ -257,9 +277,18 @@ class DatabaseManager:
             cls.db.rollback()
             print e.message
             return None
+
+        # At some point the sqlalchemy interface either changed or introduced a bug on table creation
+        # That returns an object for which fetchall() throws an error instead of returning a []
+        # This catch will also eat legitimate ResourceClosedErrors, but those are mostly threaded issues
+        # that we will probably not be particularly dealing with.
+        try:
+            res = result.fetchall()
+        except ResourceClosedError as e:
+            res = []
+
         # .commit() method is needed for changes to be saved, can create false positives in tests
         # if left out since current connection will return its changes, but other connections will not see them
-        res = result.fetchall()
         if commit:
             cls.db.commit()
         return res
@@ -289,19 +318,21 @@ class DatabaseManager:
         return bound_array(result, start_index, limit)
 
     @classmethod
-    def retrieve_from_fts(cls, search_strings, source_types=None, start_index=0, limit=None):
-        phrases = " ".join(search_strings)
-        sources = cls.get_where_clause_k_v(['source_type' for _ in source_types], ['{}'.format(s) for s in source_types], source_types, cls.OR) if source_types else None
-        query = 'select uuid, source_hash, source_type, content, rank from {0} where {0} match :content{1} order by rank'.format(cls.FTS_INDEX_TABLE, ' and {}'.format(sources) if source_types else '')
+    def retrieve_from_fts(cls, search_query, start_index=0, limit=None):
+        ix = open_dir(LOCAL_FTS_INDEX)
+        with ix.searcher() as searcher:
+            parser = QueryParser("content", ix.schema)
+            query = parser.parse(search_query)
+            results_obj = searcher.search(query)
+            results = [dict(uuid=r['id'],tags=r['tags']) for r in results_obj]
+        return bound_array(results, start_index, limit)
 
-        if not source_types:
-            params = {'content': phrases}
-        else:
-            params = {k: k for k in source_types}
-            params['content'] = phrases
-        result = cls.run_query(query, params, commit=False)
-        cites = result if result else []
-        return bound_array(cites, start_index, limit)
+    @classmethod
+    def add_to_fts(cls, content, title=None, id=None, source_hash=None, tags=None):
+        ix = open_dir(LOCAL_FTS_INDEX)
+        writer = AsyncWriter(ix)
+        writer.add_document(content=content, title=title, id=id, source_hash=source_hash, tags=tags)
+        writer.commit()
 
     @classmethod
     def check_for_table(cls, table_name):
@@ -322,11 +353,10 @@ class DatabaseManager:
                      json.dumps(extracted_info))  # 'metadata' field is just a string dump of the JSON extracted_info object
 
         result = cls.insert_into_table(cls.EXTRACTED_TABLE, cls.headers[cls.EXTRACTED_TABLE], db_values)
-        if fts and result:
-            cls.insert_into_table(cls.FTS_INDEX_TABLE, cls.headers[cls.FTS_INDEX_TABLE], (None,
-                                                                                          extracted_info.get('source_file_hash', None),
-                                                                                          'extracted',
-                                                                                          json.dumps(extracted_info)))
+        if fts:
+            cls.add_to_fts(json.dumps(extracted_info),
+                           source_hash=extracted_info.get("source_file_hash", None),
+                           tags=u"extracted")
         return result
 
     # Currently adds to citation table if it appears to be a new entry
@@ -341,11 +371,8 @@ class DatabaseManager:
             values.append(datetime.now(tz=pytz.utc))    # Created timestamp
             values.append(cite_ref.to_json_string())    # Cite object
             result = cls.insert_into_table(table, cls.headers[table], values)
-            if fts and result:
-                cls.insert_into_table(cls.FTS_INDEX_TABLE, cls.headers[cls.FTS_INDEX_TABLE], (cite_ref['uuid'],
-                                                            None,   # Source file hash not used
-                                                            cite_ref.ref_type,
-                                                            cite_ref.to_json_string()))
+            if fts:
+                cls.add_to_fts(cite_ref.to_json_string(), title=unicode(cite_ref['title']), id=unicode(cite_ref['uuid']), tags=cite_ref.ref_type)
             return result
         return False
 
@@ -373,11 +400,12 @@ class DatabaseManager:
         values.append(fields.get('created_on'))
         values.append(fields.get('created'))
         result = cls.insert_into_table(table, cls.headers[table], values)
-        if fts and result:
-            cls.insert_into_table(cls.FTS_INDEX_TABLE, cls.headers[cls.FTS_INDEX_TABLE], (fields.get('uuid'),
-                                                        fields.get('save_state_source_data'),
-                                                        fields.get('save_state_type'),
-                                                        " ".join(x for x in fields.values() if isinstance(x, str) or isinstance(x, unicode))))
+        if fts:
+            cls.add_to_fts(u" ".join(x for x in fields.values() if isinstance(x, str) or isinstance(x, unicode)),
+                           title=unicode(fields.get('description')),
+                           source_hash=fields.get('save_state_source_data'),
+                           tags=fields.get('save_state_type'),
+                           id=unicode(fields.get('uuid', uid)))
         return uid
 
 

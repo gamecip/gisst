@@ -64,24 +64,36 @@ def search():
             proc_args = ['citetool_editor', '--no_prompts', 'search', '--game_only', search_json]
         elif search_type == 'performance':
             proc_args = ['citetool_editor', '--no_prompts', 'search', '--perf_only', search_json]
+        elif search_type == 'state':
+            proc_args = ['citetool_editor', '--no_prompts', 'search', '--state_only', search_json]
 
-
-        results = json.loads(subprocess.check_output(proc_args))
-        results['games'] = map(lambda d: dict((i, d[i]) for i in d if i != 'schema_version'), results['games'])
-        results['performances'] = map(lambda d: dict((i, d['performance'][i]) for i in d['performance'] if i != 'schema_version'), results['performances'])
-        game_results = map(lambda x: generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **x), results['games'])
-        performance_results = map(lambda x: generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **x), results['performances'])
+        try:
+            output = subprocess.check_output(proc_args)
+        except subprocess.CalledProcessError as e:
+            print(e.message)
+            print(e.output)
+            game_results = []
+            performance_results =[]
+            state_results =[]
+        else:
+            results = json.loads(output)
+            results['games'] = map(lambda d: dict((i, d[i]) for i in d if i != 'schema_version'), results['games'])
+            results['performances'] = map(lambda d: dict((i, d['performance'][i]) for i in d['performance'] if i != 'schema_version'), results['performances'])
+            game_results = map(lambda x: generate_cite_ref(GAME_CITE_REF, GAME_SCHEMA_VERSION, **x), results['games'])
+            performance_results = map(lambda x: generate_cite_ref(PERF_CITE_REF, PERF_SCHEMA_VERSION, **x), results['performances'])
+            state_results = results['states']
     else:
         game_results = []
         performance_results = []
+        state_results = []
 
     return render_template('search.html',
                            game_results=game_results,
                            performance_results=performance_results,
+                           state_results=state_results,
                            source_type=search_type,
                            prev_query=search_string,
-                           total_results=len(game_results) + len(performance_results))
-
+                           total_results=len(game_results) + len(performance_results) + len(state_results))
 
 @app.route("/citation/<uuid>")
 def citation_page(uuid):
@@ -172,7 +184,6 @@ def performance_info(uuid):
     perf_info['availablePerformances'] = [dict(p.get_element_items()) for p in dbm.retrieve_derived_performances(perf_ref['game_uuid'])]
     return jsonify(perf_info)
 
-
 @app.route("/play/<uuid>")
 def play_page(uuid):
     init_state = request.values.get('init_state')
@@ -184,14 +195,32 @@ def play_page(uuid):
         has_exec = dbm.retrieve_file_path(save_state_uuid=init_state['uuid'], main_executable=True)
     else:
         has_exec = dbm.retrieve_file_path(game_uuid=uuid, save_state_uuid=None, main_executable=True)
+        init_state = {'uuid': 'NO_ID'}
 
     if cite_ref and (cite_ref['data_image_source'] or has_exec):
         return render_template('play.html',
                                init_state=init_state,
-                               cite_ref=cite_ref,
-                               state_dicts=state_dicts,
-                               state_headers=dbm.headers[dbm.GAME_SAVE_TABLE])
+                               cite_ref=cite_ref)
     return "No game data source found, sorry!"
+
+@app.route("/compare")
+def compare_page():
+    uuids = request.values.get('uuids', "").split(',')
+    game_uuids = []
+    state_uuids = []
+    for id in uuids:
+        if dbm.retrieve_attr_from_db('uuid', id, dbm.GAME_CITATION_TABLE):
+            game_uuids.append(id)
+            state_uuids.append('NO_ID')
+        elif dbm.retrieve_attr_from_db('uuid', id, dbm.GAME_SAVE_TABLE):
+            state = dbm.retrieve_save_state(uuid=id)[0]
+            state_uuids.append(id)
+            game_uuids.append(state['game_uuid'])
+
+    return render_template('compare.html',
+                           game_uuids=",".join(game_uuids),
+                           state_uuids=",".join(state_uuids)
+                           )
 
 
 @app.route("/extra_file/<uuid>/add", methods=['POST'])
@@ -252,7 +281,7 @@ def add_save_state(uuid):
     fields = OrderedDict(
         description=request.form.get('description'),
         game_uuid=uuid,
-        save_state_type='state',
+        save_state_type=u'state',
         emulator_name=request.form.get('emulator'),
         emulator_version=request.form.get('emulator_version'),
         emt_stack_pointer=request.form.get('emt_stack_pointer'),
@@ -365,7 +394,7 @@ def performance_update(uuid):
     update_fields = json.loads(request.form.get('update_fields'))
     dbm.update_table(dbm.PERFORMANCE_CITATION_TABLE, update_fields.keys(), update_fields.values(), ["uuid"], [uuid])
     perf_ref = dbm.retrieve_perf_ref(uuid)
-    dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [perf_ref.to_json_string()],["uuid"], [uuid])
+    #dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [perf_ref.to_json_string()],["uuid"], [uuid])
     return perf_ref.to_json_string()
 
 @app.route("/game/<uuid>/update", methods=['POST'])
@@ -373,7 +402,7 @@ def game_update(uuid):
     update_fields = json.loads(request.form.get('update_fields'))
     dbm.update_table(dbm.GAME_CITATION_TABLE, update_fields.keys(), update_fields.values(), ["uuid"], [uuid])
     game_ref = dbm.retrieve_game_ref(uuid)
-    dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [game_ref.to_json_string()], ["uuid"], [uuid])
+    #dbm.update_table(dbm.FTS_INDEX_TABLE, ['content'], [game_ref.to_json_string()], ["uuid"], [uuid])
     return game_ref.to_json_string()
 
 @app.route("/performance/<uuid>/add", methods=['POST'])

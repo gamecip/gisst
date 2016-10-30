@@ -12,9 +12,8 @@ CiteManager = (function(modules){
     
 
     //CNG-----------CONSTANTS/GLOBALS--------------------
-    var SINGULAR_STATE = "singleState";
-    var DEPENDENT_STATE = "dependentState";
     var LZMA_WORKER_PATH = "/static/js/lzma_worker.js";
+    var NO_ID = "NO_ID";
 
     /*Reference Tracking for LZMA Compression
      * (declaring workers inside local scope can mark them for garbage collection)
@@ -35,8 +34,8 @@ CiteManager = (function(modules){
         $.get(jsonStateInfoURL(info.record.uuid), "", function(info){ callback(null, context, info)})
     }
 
-    function asyncGetGameInfo(context, info, callback){
-        $.get(jsonGameInfoURL(info.record.uuid), "", function(info){ callback(null, context, info)} )
+    function asyncGetGameInfo(uuid, callback){
+        $.get(jsonGameInfoURL(uuid), "", function(info){ callback(info)} )
     }
 
     function asyncGetPerformanceInfo(uuid, callback){
@@ -75,8 +74,8 @@ CiteManager = (function(modules){
 
     //Compression Functions
     function decompressStateByteArray(context, info, data, callback){
-        var lzma = new LZMA(LZMA_WORKER_PATH);
         if(data.compressed){
+            var lzma = new LZMA(LZMA_WORKER_PATH);
             lzma.decompress(data.buffer,
                 function on_finish(result, err){
                     if (err) console.log("Error with decompression of state data for " + info.uuid);
@@ -271,8 +270,12 @@ CiteManager = (function(modules){
 
     //UCM-----UI CREATION AND MANAGEMENT---------
 
-    function createUIForContext(rootDivId, contextId){
-        ui.createUI(rootDivId, contextId)
+    function createUI(UIType, rootDivId, contextIDs){
+        if(UIType == CiteManager.SINGLE){
+            ui.createSingleUI(rootDivId, contextIDs[0]);
+        }else if(UIType == CiteManager.MULTI){
+            ui.createMultiUI(rootDivId, contextIDs);
+        }
     }
 
     //SSF-----------SAVE STATE FUNCTIONS----------------
@@ -316,6 +319,8 @@ CiteManager = (function(modules){
                         ), callback)
                     }
                 });
+        }, function(err){
+            console.log(err.message);
         });
     }
 
@@ -360,6 +365,7 @@ CiteManager = (function(modules){
                 }else if(data.type === "error"){
                     console.log("[SAVE STATE W]: Error with "+data.uuid+" "+data.message);
                 }else if(data.type === "finished"){
+                    console.log("[SAVE STATE W]: Completed");
                     saveStateWorker.terminate();
                     asyncSaveStateScreenData(task.info, task.screen, function(){
                         asyncGetStateInfo(task.context, task.info, function(e, c, i){
@@ -441,6 +447,8 @@ CiteManager = (function(modules){
             context.emu.loadState(dataToLoad, function(){
                 updateState(context, info, data);
                 callback(context, info, data)
+            }, function(s, e){
+                console.log(e.message);
             })
         }
         // If run length encoded handle that
@@ -511,7 +519,7 @@ CiteManager = (function(modules){
         function prepForStartEmulation(err, c, i, d){
             //Need new dataObject so that cache is correct
             var dataToLoad = {};
-            if(!c.emu.usesHeapSave){
+            if(info.record.emt_stack_pointer !== null){
                 dataToLoad.heap = d.buffer;
                 dataToLoad.emtStack = d.emtStack = info.record.emt_stack_pointer;
                 dataToLoad.time = d.time = info.record.time;
@@ -631,12 +639,27 @@ CiteManager = (function(modules){
 
     //EMF---------EMULATION MANAGEMENT FUNCTIONS--------------
 
-    function asyncStartEmulation(context, callback){
-        CiteState.cite.apply(this, prepArgsForCiteState(context, callback, {mute:true, recorder: {}}))
+    function asyncStartEmulation(context, callback, options){
+        var opts;
+        if(!options){
+            opts = {mute:true, recorder:{}};
+            options = opts;
+        }else{
+            if(!('mute' in options)) options.mute = true;
+            if(!('recorder' in options)) options.recorder = {};
+        }
+        CiteState.cite.apply(this, prepArgsForCiteState(context, callback, options))
     }
 
-    function asyncStartEmulationWithRecording(context, callback){
-        var options = {mute: false, recorder:{autoStart: true}};
+    function asyncStartEmulationWithRecording(context, callback, options){
+        var opts;
+        if(!options){
+            opts = {mute: false, recorder:{autoStart:true}};
+            options = opts;
+        }else{
+            if(!'mute' in options) options.mute = false;
+            if(!'recorder' in options) options.recorder = {autoStart: true};
+        }
         if(context.emu.requiresSDL2){
             //Add callback to start recording once SDL context is loaded
             //if necessary
@@ -653,7 +676,7 @@ CiteManager = (function(modules){
 
     function prepArgsForCiteState(context, cb, options){
         var args = [
-            context.id + "_emulationContainer",
+            UIType == CiteManager.SINGLE ? context.id + "_emulationContainer" : "emulationContainer",
             function(emu){
                 context.emu = emu;
                 if(cb)
@@ -665,9 +688,9 @@ CiteManager = (function(modules){
             null  //blank unless dependent files
             //options are next argument if needed
         ];
-        var hasFileSystem = context.emu.hasFileSystem;
         if(context.lastState){
-            if(hasFileSystem){
+            var emulatorName = context.lastState.record.emulator_name;
+            if(emulatorName !== 'DOSBOX' && emulatorName !== 'MUPEN64PLUS'){
                 args[3] = context.lastState.data;
             }else{
                 args[4] = context.lastState.data;
@@ -678,7 +701,11 @@ CiteManager = (function(modules){
         }else if(!$.isEmptyObject(context.currentGame.fileMapping)){
             args[5] = context.currentGame.fileMapping;
         }
+
         if(options){
+            if(UIType == CiteManager.MULTI){
+                options['multiple'] = true;
+            }
             args.push(options)
         }
         return args;
@@ -740,48 +767,74 @@ CiteManager = (function(modules){
     //PSF--------PAGE SPECIFIC FUNCTIONS--------
     //todo: move these to a separate module for this page
 
-    function initPageLoad(context, cb){
-        //Get information about game for loading
-        asyncGetGameInfo(context, {record: {uuid: gameUUID}},
-            function(err, c, i){
-                if(err) console.log("Error loading game " + gameUUID);
-                updateGame(c, i);
-                var tasks = [];
-                // if loading into a previous save state, load state information and data
-                if(stateUUID){
-                    tasks = [
-                        async.apply(asyncPreLoadStateFromServer, c, {record: {uuid: stateUUID}}),
+    function initPageLoad(gameUUIDs, stateUUIDs, cb){
+        var tasks = [];
+        for(var i = 0; i < gameUUIDs.length; i++){
+            tasks.push(async.apply(prepContext, gameUUIDs[i], stateUUIDs[i]))
+        }
+
+        async.parallel(tasks, function(err, results){
+            if(err) console.log("Error preloading for page: " + err);
+            cb(results);
+        });
+
+        function prepContext(gameUUID, stateUUID, cb){
+            var context = contextFactory.getNewContext();
+            asyncGetGameInfo(gameUUID, function(info){
+                updateGame(context, info);
+                if(stateUUID !== NO_ID){
+                    var stateLoadTasks = [
+                        async.apply(asyncPreLoadStateFromServer, context, {record: {uuid: stateUUID}}),
                         loadStateForStartUp
                     ];
+                    async.waterfall(stateLoadTasks, function(err, c){
+                        if(err) console.log("Error preloading state "+stateUUID+" for page: " + err);
+                        cb(err, c.id)
+                    })
+                }else{
+                    cb(null, [context.id]);
                 }
-                // after all that see if there's an error
-                async.waterfall(tasks, function(err, c){
-                    if(err) console.log("Error preloading state for page.");
-                    cb();
-                })
-            });
+            })
+        }
     }
 
     return {
+        //Constants
+        SINGLE: 'single',
+        MULTI: 'multi',
         // Direct exported functions are first (might move some of these to global scope?)
         jsonGameInfoURL: jsonGameInfoURL,
         jsonPerformanceInfoURL: jsonPerformanceInfoURL,
         jsonStateInfoURL: jsonStateInfoURL,
         initPageLoad: initPageLoad,
-        createUIForContext: createUIForContext,
+        createUI: createUI,
         // Functions that relate to or interact with internal context information
         getNewContext: function(){
             return contextFactory.getNewContext();
         },
-        startEmulation: function(contextId, cb){
-            asyncStartEmulation(this.getContextById(contextId), cb);
+        // Let's us know if the context's emulator is running (basically if it has a canvas attached to the page
+        activeContexts: function(){
+            var ctxHash = contextFactory.currentContexts();
+            var activeContexts = [];
+            for(var key in ctxHash){
+                if(ctxHash.hasOwnProperty(key)){
+                    var ctx = ctxHash[key];
+                    if(ctx.emu && ctx.emu.canvas && document.getElementById(ctx.emu.canvas.id)){
+                        activeContexts.push(key)
+                    }
+                }
+            }
+            return activeContexts;
         },
-        startEmulationWithState: function(contextId, stateUUID, cb){
+        startEmulation: function(contextId, cb, options){
+            asyncStartEmulation(this.getContextById(contextId), cb, options);
+        },
+        startEmulationWithState: function(contextId, stateUUID, cb, options){
             var me = this;
             asyncPreLoadStateFromServer(this.getContextById(contextId), {record: {uuid: stateUUID}},
                 function(err, c, i, d){ //pre load returns compressed data, loadStateForStartUp
                     loadStateForStartUp(c, i, d, function(){
-                        me.startEmulation(contextId, cb);
+                        me.startEmulation(contextId, cb, options);
                     });
                 })
         },
@@ -926,7 +979,7 @@ CiteManager = (function(modules){
             if(!$.isEmptyObject(updateData)){
                 if(recordType === 'game'){
                     $.post(updateGameRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
-                        asyncGetGameInfo(ctx, {record: JSON.parse(result)}, function(err, c, i){
+                        asyncGetGameInfo(JSON.parse(result).uuid, function(i){
                             updateGame(ctx, i);
                             if(cb)
                                 cb(result);
@@ -934,7 +987,7 @@ CiteManager = (function(modules){
                     });
                 }else if(recordType === 'performance'){
                     $.post(updatePerformanceRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
-                        asyncGetGameInfo(ctx, {record: {uuid: JSON.parse(result).game_uuid }}, function(err, c, i){
+                        asyncGetGameInfo(JSON.parse(result).game_uuid, function(i){
                             updateGame(ctx, i);
                             if(cb)
                                 cb(result);
@@ -942,7 +995,7 @@ CiteManager = (function(modules){
                     });
                 }else if(recordType === 'state'){
                     $.post(updateStateRecordURL(uuid), {update_fields: JSON.stringify(updateData)}, function(result){
-                        asyncGetGameInfo(ctx, {record: {uuid: result.game_uuid}}, function(err, c, i){
+                        asyncGetGameInfo(result.game_uuid, function(i){
                             updateGame(ctx, i);
                             if(ctx.lastState && ctx.lastState.record.uuid === uuid){
                                 ctx.lastState.record = result;
@@ -961,13 +1014,14 @@ CiteManager = (function(modules){
 }({ui:UI}));
 
     //Load initial page information into model
-    var stateUUID = $('body').data('state-uuid');
-    var gameUUID = $('body').data('game-uuid');
-    var context0 = CiteManager.getNewContext();
+    var stateUUIDs = $('body').data('state-uuids').split(",");
+    var gameUUIDs = $('body').data('game-uuids').split(",");
+    var UIType= $('body').data('ui-type');
+
     CiteState.scriptRoot = '/static/js/cite-game/';
 
-    CiteManager.initPageLoad(context0, function(){ //Load page information
-        CiteManager.createUIForContext(document.getElementById('uiBase'), context0.id); //Load UI
+    CiteManager.initPageLoad(gameUUIDs, stateUUIDs, function(contextIDs){ //Load page information
+        CiteManager.createUI(UIType, document.getElementById('uiBase'), contextIDs); //Load UI
     });
 });
 
