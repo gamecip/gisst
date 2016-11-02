@@ -3,28 +3,27 @@ __author__ = 'erickaltman'
 # Classes dealing with automatic extraction of information from urls, files, etc.
 
 
-import bs4
 import base64
-from datetime import datetime
 import calendar
-import pytz
 import hashlib
-import shutil
-import pipes
+import json
 import os
 import re
+import shutil
 import subprocess
-import requests
-import json
-import StringIO
-import youtube_dl
+import platform
 from collections import OrderedDict
-from utils import (
-    pairwise,
-    pairwise_overlap,
-    merge_dicts,
-    replace_xa0,
-    snake_case
+from datetime import datetime
+
+import bs4
+import pytz
+import requests
+import youtube_dl
+from database import DatabaseManager as dbm
+from database import (
+    LOCAL_CITATION_DATA_STORE,
+    LOCAL_GAME_DATA_STORE,
+    LOCAL_DATA_ROOT,
 )
 from schema import (
     generate_cite_ref,
@@ -33,14 +32,13 @@ from schema import (
     GAME_SCHEMA_VERSION,
     PERF_SCHEMA_VERSION
 )
-
-from database import (
-    LOCAL_CITATION_DATA_STORE,
-    LOCAL_GAME_DATA_STORE,
-    LOCAL_DATA_ROOT,
+from utils import (
+    pairwise,
+    pairwise_overlap,
+    merge_dicts,
+    replace_xa0,
+    snake_case
 )
-from database import DatabaseManager as dbm
-
 
 # General Utils
 
@@ -654,8 +652,12 @@ class YoutubeExtractor(Extractor):
     # Called when download is finished
     def wrap_up_extraction(self, d):
         if d['status'] == 'finished':
-            filename = d['filename'].split('/')[-1].rpartition('.')[0] # Flimsy for now
-            filename_with_ext = d['filename'].split('/')[-1]
+            if platform.system() == 'Windows':
+                filename = d['filename'].split('\\')[-1].rpartition('.')[0] # Flimsy for now
+                filename_with_ext = d['filename'].split('\\')[-1]
+            else:
+                filename = d['filename'].split('/')[-1].rpartition('.')[0] # Flimsy for now
+                filename_with_ext = d['filename'].split('/')[-1]
             hash = save_file_to_store(os.path.join(TEMP_DIRECTORY, filename_with_ext))
             hash_dir = os.path.join(LOCAL_CITATION_DATA_STORE, hash)
 
@@ -730,7 +732,10 @@ class FM2Extractor(Extractor):
                     else:
                         extracted_info[header] = line.split(' ', 1)[1].replace('\n', '') # Used for most fields
 
-        extracted_info['title'] = self.source.split('/')[-1] # Just get non-pathed filename
+        if platform.system() == 'Windows':
+            extracted_info['title'] = self.source.split('\\')[-1] # Just get non-pathed filename
+        else:
+            extracted_info['title'] = self.source.split('/')[-1] # Just get non-pathed filename
         extracted_info['extracted_datetime'] = datetime.now(tz=pytz.utc).isoformat()
         extracted_info['source_file_hash'] = save_file_to_store(self.source)
 
@@ -754,7 +759,10 @@ class GenericVideoExtractor(Extractor):
 
         extracted_info = {}
 
-        filename = self.source.split('/')[-1]
+        if platform.system() == 'Windows':
+            filename = self.source.split('\\')[-1]
+        else:
+            filename = self.source.split('/')[-1]
         self.source = unicode(self.source)
         parser = createParser(self.source)
         if not parser:
@@ -855,7 +863,10 @@ class SMCExtractor(Extractor):
 
         #   Save rom data to game_data store
         parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
-        parse_data['data_image_source'] = full_path.split('/')[-1]
+        if platform.system() == 'Windows':
+            parse_data['data_image_source'] = full_path.split('\\')[-1]
+        else:
+            parse_data['data_image_source'] = full_path.split('/')[-1]
         self.extracted_info = parse_data
 
     def create_citation(self):
@@ -910,7 +921,10 @@ class NESExtractor(Extractor):
 
         #   Save rom data to game_data store
         parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
-        parse_data['data_image_source'] = full_path.split('/')[-1]
+        if platform.system() == 'Windows':
+            parse_data['data_image_source'] = full_path.split('\\')[-1]
+        else:
+            parse_data['data_image_source'] = full_path.split('/')[-1]
         self.extracted_info = parse_data
 
     def create_citation(self):
@@ -957,7 +971,10 @@ class Z64Extractor(Extractor):
         parse_data['data_image_checksum_type'] = 'crc32'
 
         parse_data['source_data'] = save_file_to_store(self.source, store_path=LOCAL_GAME_DATA_STORE)
-        parse_data['data_image_source'] = full_path.split('/')[-1]
+        if platform.system() == 'Windows':
+            parse_data['data_image_source'] = full_path.split('\\')[-1]
+        else:
+            parse_data['data_image_source'] = full_path.split('/')[-1]
         self.extracted_info = parse_data
 
 
