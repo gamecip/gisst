@@ -32,9 +32,10 @@ from extractors import (
 )
 
 
+
 app = Flask(__name__)
-local_cite_data_path = os.path.expanduser("~/Library/Application Support/citetool-editor/cite_data")
-local_game_data_path = os.path.expanduser("~/Library/Application Support/citetool-editor/game_data")
+local_cite_data_path = LOCAL_CITATION_DATA_STORE
+local_game_data_path = LOCAL_GAME_DATA_STORE
 cite_data_source = Blueprint('cite_data_source', __name__, static_url_path='/cite_data', static_folder=local_cite_data_path)
 game_data_source = Blueprint('game_data_source', __name__, static_url_path='/game_data', static_folder=local_game_data_path)
 app.register_blueprint(cite_data_source)
@@ -59,13 +60,13 @@ def search():
     if search_string:
         search_json = json.dumps({'start_index':0, 'description':{'title': search_string}})
         if not search_type or search_type == 'all':
-            proc_args = ['citetool_editor', '--no_prompts', 'search', search_json]
+            proc_args = ['gisst', '--no_prompts', 'search', search_json]
         elif search_type == 'game':
-            proc_args = ['citetool_editor', '--no_prompts', 'search', '--game_only', search_json]
+            proc_args = ['gisst', '--no_prompts', 'search', '--game_only', search_json]
         elif search_type == 'performance':
-            proc_args = ['citetool_editor', '--no_prompts', 'search', '--perf_only', search_json]
+            proc_args = ['gisst', '--no_prompts', 'search', '--perf_only', search_json]
         elif search_type == 'state':
-            proc_args = ['citetool_editor', '--no_prompts', 'search', '--state_only', search_json]
+            proc_args = ['gisst', '--no_prompts', 'search', '--state_only', search_json]
 
         try:
             output = subprocess.check_output(proc_args)
@@ -482,7 +483,7 @@ def citation_new(cite_type):
 
 @app.route("/delete/<uuid>")
 def delete(uuid):
-    subprocess.call(["citetool_editor", "delete", uuid])
+    subprocess.call(["gisst", "delete", uuid])
     return redirect(url_for('citations_all_page'))
 
 @app.route("/citations")
@@ -502,7 +503,7 @@ def gif():
     uuid = request.form['uuid']
     source_hash = request.form['source_hash']
 
-    subprocess.call(["citetool_editor", "gif_performance", "--regenerate", uuid, start, end])
+    subprocess.call(["gisst", "gif_performance", "--regenerate", uuid, start, end])
 
     location_info = {'gif_location': '/cite_data/{0}/{0}_{1}_{2}.gif'.format(
         uuid,

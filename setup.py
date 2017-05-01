@@ -5,15 +5,15 @@ from setuptools import setup
 
 version = re.search(
     '^__version__\s*=\s*"(.*)"',
-    open('citetool_editor/citetool_editor.py').read(),
+    open('gisst/gisst.py').read(),
     re.M
 ).group(1)
 
 setup(
-    name='citetool-editor',
+    name='gisst',
     version=version,
     description="Game Citation Manager and Web Editor",
-    packages=["citetool_editor"],
+    packages=["gisst"],
     install_requires=[
         'click>=6',
         'beautifulsoup4',
@@ -31,13 +31,13 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        citetool_editor=citetool_editor.citetool_editor:cli
+        gisst=gisst.gisst:cli
     ''',
     author="Eric Kaltman",
     author_email="ekaltman@gmail.com",
     include_package_data=True,
     package_data={
-        'static': 'citetool_editor/static/*',
-        'templates': 'citetool_editor/templates/*'
+        'static': 'gisst/static/*',
+        'templates': 'gisst/templates/*'
     }
 )

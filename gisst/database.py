@@ -32,13 +32,13 @@ from utils import bound_array
 #   Windows sqlalchemy api only uses three slashes, because of course
 
 if platform.system() == "Windows":
-    LOCAL_DATA_ROOT = os.path.join(os.environ['APPDATA'], 'citetool-editor')
+    LOCAL_DATA_ROOT = os.path.join(os.environ['APPDATA'], 'gisst')
     engine = create_engine("sqlite:///{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
 elif platform.system() == "Darwin":
-    LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/citetool-editor")
+    LOCAL_DATA_ROOT = os.path.expanduser("~/Library/Application Support/gisst")
     engine = create_engine("sqlite:////{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
 elif platform.system() == "Linux":
-    LOCAL_DATA_ROOT = os.path.expanduser("~/.citetool-editor")
+    LOCAL_DATA_ROOT = os.path.expanduser("~/.gisst")
     engine = create_engine("sqlite:////{}".format(os.path.join(LOCAL_DATA_ROOT, 'cite.db')))
 else:
     print "This is not running on a supported system. Goodbye!"
