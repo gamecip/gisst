@@ -514,7 +514,7 @@ def gif():
     return jsonify(**location_info)
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host="0.0.0.0")
 
 #   From http://blog.asgaard.co.uk/2012/08/03/http-206-partial-content-for-flask-python
 #   Needed to serve video in streaming form expected by browsers
