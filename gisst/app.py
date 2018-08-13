@@ -41,17 +41,21 @@ game_data_source = Blueprint('game_data_source', __name__, static_url_path='/gam
 app.register_blueprint(cite_data_source)
 app.register_blueprint(game_data_source)
 
+
 @app.route("/")
 def start_page():
     return "Main page coming soon..."
+
 
 @app.route('/cite_data/<source_hash>/<filename>')
 def cite_data(source_hash, filename):
     return send_file_partial("{}/{}/{}".format(local_cite_data_path, source_hash, filename))
 
+
 @app.route('/game_data/<source_hash>/<filename>')
 def game_data(source_hash, filename):
     return send_file_partial("{}/{}/{}".format(local_game_data_path, source_hash, filename))
+
 
 @app.route('/search')
 def search():
