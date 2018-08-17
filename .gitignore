@@ -18,3 +18,5 @@ the-oregon-trail/
 *.z64
 build
 dist
+test_files/
+remove_venv.sh

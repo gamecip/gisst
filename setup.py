@@ -35,9 +35,5 @@ setup(
     ''',
     author="Eric Kaltman",
     author_email="ekaltman@gmail.com",
-    include_package_data=True,
-    package_data={
-        'static': 'gisst/static/*',
-        'templates': 'gisst/templates/*'
-    }
+    include_package_data=True
 )
