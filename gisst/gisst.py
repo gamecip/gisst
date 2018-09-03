@@ -80,8 +80,8 @@ def cli(ctx, verbose, no_prompts):
 
 @cli.command(help='Run local access server for citations.')
 @click.option('--port', help='Specify port for server. (default={}'.format(8100), default=8100)
-def serve(port):
-    app.run(port=port, debug=True, threaded=True)
+def serve(port, host):
+    app.run(port=port, debug=True, threaded=True, host='127.0.0.1')
 
 @cli.command(help='Extract metadata from a compatible url.')
 @click.argument('uri')
