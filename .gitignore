@@ -22,3 +22,4 @@ test_files/
 remove_venv.sh
 dat_files/
 *~
+quick_build.sh
